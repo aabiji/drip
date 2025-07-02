@@ -1,0 +1,63 @@
+Overview of the protocol we'll follow to transmit files p2p over a local area network:
+
+1. mDNS Discovery:
+   Advertise _fileshare._tcp.local with instance name Peer-<device_id>, including IP,
+   signaling port, and device ID using mDNS multicast to 224.0.0.251:5353.
+
+   When a service is found, add the peer to the list with its IP, port, and device ID.
+
+   When a service is removed, remove the peer from the list.
+
+   Use TCP for signaling packets, with JSON messages like
+   { kind: "offer" | "answer" | "ice", peer_id: "<device_id>", data: "<SDP or ICE>" }
+
+2. Add New Peer:
+   If our device_id < their device_id:
+   Create an SDP offer, set local session description, and send it to the peer’s
+   TCP signaling port.
+
+   Mark connection state as initiated.
+
+   If no answer is received within 10 seconds, retry up to 3 times with exponential backoff
+   (1s, 2s, 4s). If all retries fail, mark the peer as not connected.
+
+   Otherwise, wait for an offer.
+
+3. Receive Offer:
+   Accept the offer only if the peer’s device ID is lower than ours,
+   ignoring others to avoid race conditions.
+
+   Set remote description. Create an answer, set local session description, and
+   send the answer via TCP.
+
+   Add the peer to the list if it's not already added and mark connection state as
+   initiating (we're the responder)
+
+4. Receive Answer:
+   Assume we initiated the connection.
+
+   Set remote session description.
+
+   Send our ICE candidates via TCP (we're the initiator).
+
+5. Receive ICE Candidate:
+   If responder:
+   Send our ICE candidates via TCP.
+
+   If remote and local descriptors are not set, buffer the initiator’s ICE candidate;
+   otherwise, set it.
+
+   If initiator:
+
+   If remote and local descriptors are not set, buffer the responder’s ICE candidate;
+   otherwise, set it.
+
+   Discard buffered candidates after a 30-second timeout if descriptors are not set.
+
+6. Data Channel Opens:
+   Mark the peer’s connection state as connected.
+   We can now transfer data!
+
+7. ICE State Change:
+   If disconnected or failed, set peer state to not connected, close the WebRTC connection,
+   and remove associated resources.

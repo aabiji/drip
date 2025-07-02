@@ -1,30 +1,185 @@
+use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
 
-#[derive(Debug, Clone, Routable, PartialEq)]
-#[rustfmt::skip]
-enum Route {
-    #[route("/")]
-    Home {},
-}
+use drip_net::p2p::PeerToPeerService;
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
+const FILE_ICON: Asset = asset!("/assets/icons/file.png");
+const UPLOAD_ICON: Asset = asset!("/assets/icons/upload.png");
+const MOBILE_ICON: Asset = asset!("/assets/icons/smartphone.png");
+const DESKTOP_ICON: Asset = asset!("/assets/icons/laptop.png");
+const CHECKMARK_ICON: Asset = asset!("/assets/icons/checkmark.png");
+const PLUS_ICON: Asset = asset!("/assets/icons/plus.png");
+
 fn main() {
-    dioxus::launch(App);
+    let service = PeerToPeerService::new();
+    drip_net::start_background_tasks(service);
+
+    dioxus::LaunchBuilder::new()
+        .with_cfg(
+            Config::default()
+                .with_menu(None)
+                .with_window(WindowBuilder::new().with_maximized(true).with_title("Drip")),
+        )
+        .launch(App);
 }
 
 #[component]
 fn App() -> Element {
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
-        Router::<Route> {}
+        Home {}
     }
 }
 
 #[component]
 fn Home() -> Element {
+    let mut showing_files = use_signal(|| false);
+
     rsx! {
-        h1 { "This is a basic template!" }
-        button { onclick: |_event| backend::demo(), "click me!" }
+        div {
+            class: "navbar",
+            button {
+                class: if *showing_files.read() { "active" } else { "" },
+                onclick: move |_| showing_files.set(true),
+                "Files"
+            }
+            button {
+                class: if !*showing_files.read() { "active" } else { "" },
+                onclick: move |_| showing_files.set(false),
+                "Settings"
+            }
+        }
+
+        if *showing_files.read() {
+             FileView{}
+        } else {
+             SettingsView{}
+        }
+    }
+}
+
+#[component]
+fn FileView() -> Element {
+    let example_files = [
+        "File A", "File B", "File C", "File D", "File E", "File F", "File G", "File H", "File J",
+    ];
+
+    rsx! {
+        label {
+            class: "file-picker",
+            "Drag and drop or select files"
+                input {
+                    r#type: "file",
+                    multiple: true,
+                    onchange: move |event| {
+                        // handle files here
+                    },
+                    img { src: UPLOAD_ICON }
+                }
+        }
+
+        div {
+            class: "file-grid",
+
+            for file in example_files {
+                button {
+                    class: "file",
+                    onclick: move |event| {
+                        // copy file path to clipboard
+                    },
+
+                    div {
+                        img { src: FILE_ICON }
+                        div {
+                            class: "info",
+                            p { "{file}" },
+                            p { "Size" },
+                            p { "Sent from" }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn DeviceList() -> Element {
+    rsx! {
+        div {
+            h2 { "Devices" }
+
+            div {
+                class: "device",
+                img { src: DESKTOP_ICON }
+                h3 { "Device A" }
+                button {
+                    class: "status connected",
+                    img { src: CHECKMARK_ICON }
+                    "Connected"
+                }
+            }
+
+            div {
+                class: "device",
+                img { src: MOBILE_ICON }
+                h3 { "Device B" }
+                button {
+                    class: "status connecting",
+                    img { src: CHECKMARK_ICON }
+                    "Connecting"
+                }
+            }
+
+            div {
+                class: "device",
+                img { src: MOBILE_ICON }
+                h3 { "Device C" }
+                button {
+                    class: "status disconnected",
+                    img { src: PLUS_ICON }
+                    "Add"
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn SettingsView() -> Element {
+    rsx! {
+        div {
+            class: "settings-container",
+
+            DeviceList {}
+            hr {}
+
+            div {
+                h2 { "Misc" }
+
+                label {
+                    class: "destination-picker",
+                    "Download path"
+                        input {
+                            r#type: "file",
+                            multiple: true,
+                            onchange: move |event| {
+                                // handle path here
+                            },
+                        }
+                }
+
+                button {
+                    "Toggle theme"
+                }
+            }
+
+            p {
+                class: "footer",
+                "(C) Abigail Adegbiji, 2025 - now"
+            }
+        }
     }
 }

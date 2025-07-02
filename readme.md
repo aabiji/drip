@@ -6,4 +6,7 @@ There are 2 crates:
 - drip-net implements the p2p file sharing
 - drip-app implements the desktop, web and mobile frontend using Dioxus
 
-TODO: combine the 2 crates together into one large app
+Building:
+```bash
+dx serve --platform desktop --package=drip-app
+```

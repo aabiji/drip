@@ -6,13 +6,15 @@ use tokio::sync::Mutex;
 use super::mdns::{Peer, Status, MDNS};
 
 #[derive(Default)]
-pub struct PeerToPeerService {
+pub struct P2PService {
     pub peers: Vec<Peer>,
 }
 
-impl PeerToPeerService {
-    pub fn new() -> Arc<Mutex<Self>> {
-        Arc::new(Mutex::new(PeerToPeerService::default()))
+pub type SafeP2PService = Arc<Mutex<P2PService>>;
+
+impl P2PService {
+    pub fn new() -> SafeP2PService {
+        Arc::new(Mutex::new(P2PService::default()))
     }
 
     pub async fn run_mdns(shared_self: Arc<Mutex<Self>>) {

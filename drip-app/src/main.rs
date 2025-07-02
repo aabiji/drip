@@ -1,7 +1,7 @@
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
 
-use drip_net::p2p::PeerToPeerService;
+use drip_net::p2p::{P2PService, SafeP2PService};
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
@@ -12,9 +12,10 @@ const DESKTOP_ICON: Asset = asset!("/assets/icons/laptop.png");
 const CHECKMARK_ICON: Asset = asset!("/assets/icons/checkmark.png");
 const PLUS_ICON: Asset = asset!("/assets/icons/plus.png");
 
+static SERVICE: GlobalSignal<SafeP2PService> = Global::new(|| P2PService::new());
+
 fn main() {
-    let service = PeerToPeerService::new();
-    drip_net::start_background_tasks(service);
+    drip_net::start_background_tasks(SERVICE.read().clone());
 
     dioxus::LaunchBuilder::new()
         .with_cfg(
@@ -35,7 +36,7 @@ fn App() -> Element {
 
 #[component]
 fn Home() -> Element {
-    let mut showing_files = use_signal(|| false);
+    let mut showing_files = use_signal(|| true);
 
     rsx! {
         div {
@@ -107,40 +108,32 @@ fn FileView() -> Element {
 
 #[component]
 fn DeviceList() -> Element {
+    let peers = use_resource(move || async move {
+        let service = SERVICE.read().clone();
+        let guard = service.lock().await;
+        guard.peers.clone()
+    });
+
     rsx! {
         div {
             h2 { "Devices" }
-
-            div {
-                class: "device",
-                img { src: DESKTOP_ICON }
-                h3 { "Device A" }
-                button {
-                    class: "status connected",
-                    img { src: CHECKMARK_ICON }
-                    "Connected"
-                }
-            }
-
-            div {
-                class: "device",
-                img { src: MOBILE_ICON }
-                h3 { "Device B" }
-                button {
-                    class: "status connecting",
-                    img { src: CHECKMARK_ICON }
-                    "Connecting"
-                }
-            }
-
-            div {
-                class: "device",
-                img { src: MOBILE_ICON }
-                h3 { "Device C" }
-                button {
-                    class: "status disconnected",
-                    img { src: PLUS_ICON }
-                    "Add"
+            match *peers.read() {
+                Some(peers) => rsx! {
+                    for peer in peers.iter() {
+                        div {
+                            class: "device",
+                            img { src: if peer.is_mobile { MOBILE_ICON } else { DESKTOP_ICON } }
+                            h3 { "{peer.id}" }
+                            button {
+                                class: "status connected",
+                                img { src: CHECKMARK_ICON }
+                                "Connected"
+                            }
+                        }
+                    }
+                },
+                None => rsx! {
+                    p { "Loading peers..." }
                 }
             }
         }

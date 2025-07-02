@@ -3,9 +3,9 @@ use std::net::IpAddr;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use tokio::sync::mpsc::Sender;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Peer {
-    pub ip: IpAddr,
+    pub ip: String,
     pub id: String,
     pub is_mobile: bool,
 }

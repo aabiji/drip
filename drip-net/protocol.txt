@@ -1,5 +1,7 @@
 Overview of the protocol we'll follow to transmit files p2p over a local area network:
 
+TODO: how to enfore security
+
 1. mDNS Discovery:
    Advertise _fileshare._tcp.local with instance name Peer-<device_id>, including IP,
    signaling port, and device ID using mDNS multicast to 224.0.0.251:5353.
@@ -12,10 +14,21 @@ Overview of the protocol we'll follow to transmit files p2p over a local area ne
 2. This list of peers will be displayed to the user. For security purposes, the user
    can choose which devices they will authorize. This list of authorized devices
    should be cached to a file for convenience sake. So WebRTC connections are not
-   created automatically between unknown peers and we are always the initializing device.
+   created automatically between unknown peers.
 
-   TODO: enforcing security between authorized devices, to avoid man in the middle
-         attacks and stuff
+   When initializing a WebRTC connection there are 2 possible cases:
+   - We authorized the peer, so we're always the initiator (since the peer wouldn't
+     have us authorized already) (we're manually opening a new connection)
+   - We already have the peer authorized, so we're automatically creating a connection
+
+   In any case, we'll use the perfect negotiation pattern to handle collisions,
+   where 2 peers send offers to each other. The nice thing about it is that
+   both peers can share the exact same code.
+
+   We'll determine if the user is "polite" or "impolite". If we're polite, when we
+   receive an offer, we rollback our own connection and accept the offer. If we're
+   impolite, we just set a flag to ignore all subsequent offers, and continue
+   with our own offer.
 
    The streaming model will be *one machine to many*, so after authorization
    (or if the device is already authorized),
@@ -33,9 +46,6 @@ Overview of the protocol we'll follow to transmit files p2p over a local area ne
    send the answer via TCP.
 
    Add the peer who sent us the offer to our list of authorized devices automatically.
-
-   TODO: if machine A connects to machine B and machine C, how can machine B know
-         to automatically add machine C as authorized too?
 
    Add the peer to the list if it's not already added and mark connection state as
    initiating (we're the responder)
@@ -65,16 +75,21 @@ Overview of the protocol we'll follow to transmit files p2p over a local area ne
 
 8. Transfering files:
    First send a START_TRANSFER message, listing the file name, it's final size,
-   the number of chunks, it's mimetype, and so on.
-   The other device HAS to get this, so ensure that we get a START_TRANSFER_ACKNOLEDGED
-   message back.
+   the number of chunks, it's mimetype, file permissions (how to make that cross platform?),
+   and so on. The other device HAS to get this, so ensure that we get a
+   START_TRANSFER_ACKNOLEDGED message back.
 
    Break up the file into chunks. Hash each chunk so we can verify that it hasn't
    been corrupted when we receive it. Send over each chunk. Also send over the
-   chunk index so we know what order the chunk should be in.
+   chunk index so we know what order the chunk should be in. The sender and receiver
+   should cache the progress of the file transfer (current chunk index).
+   The receiver should have a .part file that we'll append chunks to. Then when
+   it receives all the chunks it'll rename the file and set permissions and stuff.
 
-   TODO: pending transfers
+   Pending transfers are an app problem, we can just cache the files we want to
+   transfer, then when we connect to peers we start transfering the files.
 
-   TODO: resuming transfers
+   To resume transfers, we can set start_chunk_index in the START_TRANSFER message.
 
-   TODO: cancelling transfers
+   To cancel a transfer we can send a CANCEL_TRANSFER message. The receiver will
+   handle that accordingly.

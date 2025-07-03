@@ -5,7 +5,7 @@ use tokio::sync::mpsc::Sender;
 
 #[derive(Debug, Clone)]
 pub struct Peer {
-    pub ip: String,
+    pub ip: IpAddr,
     pub id: String,
     pub is_mobile: bool,
 }

@@ -17,6 +17,7 @@ impl P2PService {
         Arc::new(Mutex::new(P2PService::default()))
     }
 
+    // TODO: use tokio signals to stop these on background process close
     pub async fn run_mdns(shared_self: Arc<Mutex<Self>>) {
         let (sender, mut receiver) = mpsc::channel::<Status>(32);
 

@@ -15,8 +15,6 @@ const PLUS_ICON: Asset = asset!("/assets/icons/plus.png");
 static SERVICE: GlobalSignal<SafeP2PService> = Global::new(|| P2PService::new());
 
 fn main() {
-    drip_net::start_background_tasks(SERVICE.read().clone());
-
     dioxus::LaunchBuilder::new()
         .with_cfg(
             Config::default()
@@ -28,6 +26,14 @@ fn main() {
 
 #[component]
 fn App() -> Element {
+    use_effect(move || {
+        let service = SERVICE.read().clone();
+
+        spawn(async move {
+            P2PService::run_mdns(service).await;
+        });
+    });
+
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         Home {}
@@ -108,6 +114,7 @@ fn FileView() -> Element {
 
 #[component]
 fn DeviceList() -> Element {
+    // TODO: this is buggy
     let peers = use_resource(move || async move {
         let service = SERVICE.read().clone();
         let guard = service.lock().await;
@@ -117,7 +124,7 @@ fn DeviceList() -> Element {
     rsx! {
         div {
             h2 { "Devices" }
-            match *peers.read() {
+            match (*peers.read()).clone() {
                 Some(peers) => rsx! {
                     for peer in peers.iter() {
                         div {

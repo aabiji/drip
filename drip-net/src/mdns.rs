@@ -1,10 +1,11 @@
-use super::peer::Peer;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
-use rand::Rng;
+
 use tokio::sync::mpsc::Sender;
 
+use super::peer::PeerInfo;
+
 pub enum Status {
-    PeerFound(Peer),
+    PeerFound(PeerInfo),
     PeerLost { id: String },
 }
 
@@ -12,28 +13,21 @@ pub struct MDNS {
     daemon: ServiceDaemon,
     our_id: String,
     our_service_type: String,
-    port: u16,
 }
 
 impl MDNS {
     pub fn new(debug_mode: bool) -> Self {
         let daemon = ServiceDaemon::new().expect("Failed to create mdns daemon");
-        let (our_id, port) = if debug_mode {
-            let mut rng = rand::rng();
-            (
-                // use command line flags for testing
-                format!("peer-{}", rng.random_range(0..10)),
-                rng.random_range(1000..=5000),
-            )
+        let our_id = if debug_mode {
+            format!("peer-{}", rand::random_range(0..10))
         } else {
-            (whoami::devicename(), 8081_u16)
+            whoami::devicename()
         };
 
         Self {
             daemon,
             our_id,
             our_service_type: String::from("_fileshare._tcp.local."),
-            port,
         }
     }
 
@@ -52,7 +46,7 @@ impl MDNS {
             &self.our_id,
             &hostname,
             our_ip,
-            self.port,
+            8081,
             &properties[..],
         )
         .unwrap();
@@ -71,17 +65,21 @@ impl MDNS {
         while let Ok(event) = receiver.recv_async().await {
             match event {
                 ServiceEvent::ServiceResolved(info) => {
-                    let peer_ip = info.get_addresses().iter().next().unwrap();
-                    let peer_id = info.get_fullname().split(".").next().unwrap();
-                    let is_mobile = info.get_property_val_str("is_mobile").unwrap() == "true";
+                    let ip = info.get_addresses().iter().next().unwrap();
+                    let id = info.get_fullname().split(".").next().unwrap();
+                    let mobile = info.get_property_val_str("is_mobile").unwrap() == "true";
 
-                    if info.get_type() == self.our_service_type && peer_id != self.our_id {
+                    if info.get_type() == self.our_service_type && id != self.our_id {
+                        let polite = id.to_lowercase() < self.our_id.to_lowercase();
+
                         sender
-                            .send(Status::PeerFound(Peer::new(
-                                *peer_ip,
-                                peer_id.to_string(),
-                                is_mobile,
-                            )))
+                            .send(Status::PeerFound(PeerInfo{
+                                ip: *ip,
+                                our_id: self.our_id.clone(),
+                                id: id.to_string(),
+                                mobile,
+                                polite
+                            }))
                             .await
                             .unwrap();
                     }

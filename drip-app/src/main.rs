@@ -15,7 +15,7 @@ const DESKTOP_ICON: Asset = asset!("/assets/icons/laptop.png");
 const CHECKMARK_ICON: Asset = asset!("/assets/icons/checkmark.png");
 const PLUS_ICON: Asset = asset!("/assets/icons/plus.png");
 
-static SERVICE: Lazy<SafeP2PService> = Lazy::new(P2PService::new);
+static SERVICE: Lazy<SafeP2PService> = Lazy::new(P2PService::safe_new);
 
 fn main() {
     dioxus::LaunchBuilder::new()
@@ -116,7 +116,7 @@ fn FileView() -> Element {
 
 #[component]
 fn DeviceList() -> Element {
-    let peers = use_resource(move || async move { SERVICE.lock().await.peers.clone() });
+    let peers = use_resource(move || async move { SERVICE.lock().await.peers.clone().keys() });
 
     let update_peer = move |index: usize| {
         let clone = SERVICE.clone();

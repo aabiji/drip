@@ -7,6 +7,7 @@ edition = "2021"
 [dependencies]
 dioxus = { version = "0.6.0" }
 drip-net = { path = "../drip-net" }
+once_cell = "1.21.3"
 
 [features]
 default = ["desktop"]

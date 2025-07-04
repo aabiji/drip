@@ -1,16 +1,8 @@
-use std::net::IpAddr;
-
+use super::peer::Peer;
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
+use rand::Rng;
 use tokio::sync::mpsc::Sender;
 
-#[derive(Debug, Clone)]
-pub struct Peer {
-    pub ip: IpAddr,
-    pub id: String,
-    pub is_mobile: bool,
-}
-
-#[derive(Debug)]
 pub enum Status {
     PeerFound(Peer),
     PeerLost { id: String },
@@ -27,10 +19,11 @@ impl MDNS {
     pub fn new(debug_mode: bool) -> Self {
         let daemon = ServiceDaemon::new().expect("Failed to create mdns daemon");
         let (our_id, port) = if debug_mode {
+            let mut rng = rand::rng();
             (
                 // use command line flags for testing
-                std::env::args().nth(1).unwrap(),
-                std::env::args().nth(2).unwrap().parse::<u16>().unwrap(),
+                format!("peer-{}", rng.random_range(0..10)),
+                rng.random_range(1000..=5000),
             )
         } else {
             (whoami::devicename(), 8081_u16)
@@ -84,11 +77,11 @@ impl MDNS {
 
                     if info.get_type() == self.our_service_type && peer_id != self.our_id {
                         sender
-                            .send(Status::PeerFound(Peer {
-                                ip: *peer_ip,
-                                id: peer_id.to_string(),
+                            .send(Status::PeerFound(Peer::new(
+                                *peer_ip,
+                                peer_id.to_string(),
                                 is_mobile,
-                            }))
+                            )))
                             .await
                             .unwrap();
                     }

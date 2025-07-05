@@ -1,8 +1,8 @@
 use dioxus::desktop::{tao::window::WindowBuilder, Config};
 use dioxus::prelude::*;
 
-use drip_net::p2p::{P2PService, SafeP2PService};
-use drip_net::peer::ConnectionState;
+use drip_net::{P2PService, SafeP2PService};
+use drip_net::peer::{ConnectionState, PeerInfo};
 
 use once_cell::sync::Lazy;
 
@@ -116,34 +116,47 @@ fn FileView() -> Element {
 
 #[component]
 fn DeviceList() -> Element {
-    let peers = use_resource(move || async move { SERVICE.lock().await.peers.clone().keys() });
+    let peers_loaded = use_resource(move || async move {
+        let guard = SERVICE.lock().await;
+        let mut devices = Vec::new();
+        for (index, peer) in guard.peers.values().enumerate() {
+            let info = peer.info.clone();
+            let state = peer.info.state.lock().await.clone();
+            devices.push((index, info, state));
+        }
+        devices
+    });
 
     let update_peer = move |index: usize| {
         let clone = SERVICE.clone();
         spawn(async move {
-            P2PService::authorize_peer(clone, index).await;
+            P2PService::connect_peer(clone, index).await;
         });
     };
 
     rsx! {
         div {
             h2 { "Devices" }
-            match (*peers.read()).clone() {
-                Some(peers) if peers.len() == 0 => rsx! { p { "No nearby devices found" } },
+            match (*peers_loaded.read()).clone() {
                 None => rsx! { p { "Loading peers..." } },
 
-                Some(peers) => rsx! {
-                    for (index, peer) in peers.iter().enumerate() {
+                Some(devices) if devices.is_empty() => rsx! { p { "No nearby devices found" } },
+
+                Some(devices) => {
+                            let devices = devices.clone(); // clone once here
+
+                    rsx! {
+                    for (index, info, state) in devices.iter() {
                         div {
                             class: "device",
-                            img { src: if peer.is_mobile { MOBILE_ICON } else { DESKTOP_ICON } }
-                            h3 { "{peer.id}" }
+                            img { src: if info.mobile { MOBILE_ICON } else { DESKTOP_ICON } }
+                            h3 { "{info.id}" }
 
-                            match peer.state {
+                            match state {
                                 ConnectionState::Connected => rsx! {
                                     button {
                                         class: "status connected",
-                                        onclick: move |_| update_peer(index),
+                                        onclick: move |_| update_peer(*index),
                                         img { src: CHECKMARK_ICON }
                                         "Connected"
                                     }
@@ -152,18 +165,20 @@ fn DeviceList() -> Element {
                                     button {
                                         class: "status connecting",
                                         img { src: CHECKMARK_ICON } // TODO: loading animation
-                                        "Connected"
+                                        "Connecting"
                                     }
                                 },
                                 ConnectionState::Disconnected => rsx! {
                                     button {
                                         class: "status disconnected",
+                                        onclick: move |_| update_peer(*index),
                                         img { src: PLUS_ICON }
                                         "Add"
                                     }
                                 },
                             }
                         }
+                    }
                     }
                 }
             }

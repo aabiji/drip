@@ -36,10 +36,11 @@ impl P2PService {
                 let mut this = shared_self.lock().await;
                 match message {
                     mdns::Status::PeerFound(info) => {
-                        let peer = peer::Peer::new(info);
-                        this.peers.insert(info.id, peer);
+                        let id = info.id.clone();
+                        let peer = peer::Peer::new(info).await;
+                        this.peers.insert(id, peer);
                     }
-                    mdns::Status::PeerLost { id } => this.peers.remove(&id),
+                    mdns::Status::PeerLost { id } => { this.peers.remove(&id).unwrap(); },
                 }
             }
         });

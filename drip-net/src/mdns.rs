@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 
 use tokio::sync::mpsc::Sender;
+use tokio::sync::Mutex;
 
-use super::peer::PeerInfo;
+use super::peer::{PeerInfo, ConnectionState};
 
 pub enum Status {
     PeerFound(PeerInfo),
@@ -78,7 +81,8 @@ impl MDNS {
                                 our_id: self.our_id.clone(),
                                 id: id.to_string(),
                                 mobile,
-                                polite
+                                polite,
+                                state: Arc::new(Mutex::new(ConnectionState::Disconnected))
                             }))
                             .await
                             .unwrap();

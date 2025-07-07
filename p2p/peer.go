@@ -9,15 +9,13 @@ import (
 	"github.com/pion/webrtc/v4"
 )
 
-// connection states
-const (
+const ( // connection states
 	DISCONNECTED = 0
 	CONNECTED    = 1
 	CONNECTING   = 2
 )
 
-// packet types
-const (
+const ( // packet types
 	OFFER_PACKET  = 0
 	ANSWER_PACKET = 1
 	ICE_PACKET    = 2
@@ -38,11 +36,14 @@ type Peer struct {
 	ConnectionState int
 
 	lastHeardFrom time.Time
-	makingOffer   bool
 
-	connection    *webrtc.PeerConnection
-	dataChannel   *webrtc.DataChannel
+	makingOffer bool
+	connection  *webrtc.PeerConnection
+	dataChannel *webrtc.DataChannel
+
 	packetChannel chan packet
+	udpPort       int
+	udpConnection *net.UDPConn
 }
 
 // This will be used for perfect negotiation. Being polite will
@@ -51,6 +52,11 @@ type Peer struct {
 // our own. This way, we avoid collisions by knowing that only one peer
 // is able to initiate a connection
 func (p *Peer) isPolite() bool { return p.Id < DEVICE_ID }
+
+func (p *Peer) Close() {
+	p.dataChannel.GracefulClose()
+	p.udpConnection.Close()
+}
 
 func (p *Peer) CreateConnection() {
 	var err error
@@ -209,32 +215,30 @@ func (p *Peer) handleICECandidate(pkt packet) {
 }
 
 func (p *Peer) RunClientAndServer() {
-	port := "1234"
 	bufferSize := 65536
 
-	udpAddr, err := net.ResolveUDPAddr("udp4", fmt.Sprintf("0.0.0.0:%s", port))
-	if err != nil {
-		panic(err)
-	}
-
-	conn, err := net.ListenUDP("udp", udpAddr)
+	// reading from the peer's port
+	var err error
+	listenAddr := &net.UDPAddr{Port: p.udpPort, IP: net.IPv4zero}
+	p.udpConnection, err = net.ListenUDP("udp", listenAddr)
 	if err != nil {
 		panic(err)
 	}
 
 	// Enable broadcast
-	conn.SetWriteBuffer(bufferSize)
-	conn.SetReadBuffer(bufferSize)
+	p.udpConnection.SetWriteBuffer(bufferSize)
+	p.udpConnection.SetReadBuffer(bufferSize)
 
 	// forward json data written to the channel to the client over UDP
+	// write to our own port
 	go func() {
-		broadcastAddr, _ := net.ResolveUDPAddr("udp4", fmt.Sprintf("255.255.255.255:%s", port))
-		for packet := range p.packetChannel {
-			jsonPacket, err := json.Marshal(packet)
+		broadcastAddr := &net.UDPAddr{Port: DEVICE_PORT, IP: net.IPv4bcast}
+		for pkt := range p.packetChannel {
+			jsonPacket, err := json.Marshal(pkt)
 			if err != nil {
 				panic(err)
 			}
-			conn.WriteToUDP(jsonPacket, broadcastAddr)
+			p.udpConnection.WriteToUDP(jsonPacket, broadcastAddr)
 		}
 	}()
 
@@ -242,13 +246,13 @@ func (p *Peer) RunClientAndServer() {
 	go func() {
 		for {
 			buffer := make([]byte, bufferSize)
-			_, _, err := conn.ReadFromUDP(buffer[0:])
+			length, _, err := p.udpConnection.ReadFromUDP(buffer[0:])
 			if err != nil {
 				panic(err)
 			}
 
 			var pkt packet
-			err = json.Unmarshal(buffer, &pkt)
+			err = json.Unmarshal(buffer[0:length], &pkt)
 			if err != nil {
 				panic(err)
 			}

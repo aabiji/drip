@@ -2,9 +2,7 @@ package p2p
 
 import (
 	"fmt"
-	"math/rand"
 	"net"
-	"os"
 	"runtime"
 	"strings"
 	"sync"
@@ -13,40 +11,8 @@ import (
 	"github.com/hashicorp/mdns"
 )
 
-func getDeviceIP() net.IP {
-	// get the prefered outbound ip address of this device
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		panic(err) // getting the ip is a must
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP
-}
-
-// if the DRIP_DEBUG environment variable is set, this will return
-// a ranomized name instead of the actual host name to facilitate testing
-func getDeviceName() string {
-	debug := strings.Trim(os.Getenv("DRIP_DEBUG"), " ")
-	if len(debug) > 0 {
-		id := rand.Intn(1000000)
-		return fmt.Sprintf("peer-%d", id)
-	}
-
-	name, err := os.Hostname()
-	if err != nil {
-		panic(err) // getting the hostname is a must
-	}
-	return name
-}
-
-const QUIT = 0 // Event channel value
-
-var DEVICE_ID = getDeviceName()
-
 type PeerDiscovery struct {
-	Peers map[string]Peer
+	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
 	serviceType        string
@@ -58,7 +24,7 @@ type PeerDiscovery struct {
 func NewPeerDiscovery() PeerDiscovery {
 	return PeerDiscovery{
 		serviceType: "_fileshare._tcp.local.",
-		Peers:       make(map[string]Peer),
+		Peers:       make(map[string]*Peer),
 
 		peerRemovalTimeout: time.Minute * 3,
 		queryFrequency:     time.Second * 10,
@@ -67,13 +33,14 @@ func NewPeerDiscovery() PeerDiscovery {
 
 func (d *PeerDiscovery) broadcastOurService() error {
 	isMobileDevice := runtime.GOOS == "android" || runtime.GOOS == "ios"
-	txtVar := fmt.Sprintf("is_mobile=%t", isMobileDevice)
+	txtVars := []string{
+		fmt.Sprintf("is_mobile=%t", isMobileDevice),
+	}
 	hostname := fmt.Sprintf("%s.local.", DEVICE_ID)
 
 	service, err := mdns.NewMDNSService(
-		DEVICE_ID, d.serviceType, "local.",
-		hostname, 8080, []net.IP{getDeviceIP()},
-		[]string{txtVar})
+		DEVICE_ID, d.serviceType, "local.", hostname,
+		DEVICE_PORT, []net.IP{getDeviceIP()}, txtVars)
 	if err != nil {
 		return err
 	}
@@ -89,24 +56,25 @@ func (d *PeerDiscovery) addPeer(entry *mdns.ServiceEntry) {
 	}
 	isMobile := strings.Split(entry.InfoFields[0], "=")[1] == "true"
 
-	peer := Peer{
-		Ip:            entry.AddrV4,
-		Id:            peerId,
-		IsMobile:      isMobile,
-		lastHeardFrom: time.Now(),
-	}
-
-	// TODO: test this!
 	d.mutex.Lock()
-	existing, exists := d.Peers[peerId]
+
+	_, exists := d.Peers[peerId]
 	if exists {
-		existing.lastHeardFrom = time.Now()
-		d.Peers[peerId] = existing
+		d.Peers[peerId].lastHeardFrom = time.Now()
 	} else {
+		peer := &Peer{
+			Ip:            entry.AddrV4,
+			Id:            peerId,
+			IsMobile:      isMobile,
+			udpPort:       entry.Port,
+			lastHeardFrom: time.Now(),
+		}
 		peer.CreateConnection()
 		peer.RunClientAndServer()
+		peer.SetupDataChannel()
 		d.Peers[peerId] = peer
 	}
+
 	d.mutex.Unlock()
 }
 

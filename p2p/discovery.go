@@ -2,6 +2,8 @@ package p2p
 
 import (
 	"fmt"
+	"io"
+	"log"
 	"net"
 	"runtime"
 	"strings"
@@ -15,7 +17,10 @@ type PeerDiscovery struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
-	serviceType        string
+	deviceId    string
+	devicePort  int
+	serviceType string
+
 	peerRemovalTimeout time.Duration
 	queryFrequency     time.Duration
 	server             *mdns.Server
@@ -23,9 +28,10 @@ type PeerDiscovery struct {
 
 func NewPeerDiscovery() PeerDiscovery {
 	return PeerDiscovery{
-		serviceType: "_fileshare._tcp.local.",
-		Peers:       make(map[string]*Peer),
-
+		deviceId:           getDeviceName(),
+		devicePort:         getUnusedPort(),
+		Peers:              make(map[string]*Peer),
+		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Minute * 3,
 		queryFrequency:     time.Second * 10,
 	}
@@ -36,11 +42,11 @@ func (d *PeerDiscovery) broadcastOurService() error {
 	txtVars := []string{
 		fmt.Sprintf("is_mobile=%t", isMobileDevice),
 	}
-	hostname := fmt.Sprintf("%s.local.", DEVICE_ID)
+	hostname := fmt.Sprintf("%s.local.", d.deviceId)
 
 	service, err := mdns.NewMDNSService(
-		DEVICE_ID, d.serviceType, "local.", hostname,
-		DEVICE_PORT, []net.IP{getDeviceIP()}, txtVars)
+		d.deviceId, d.serviceType, "local.", hostname,
+		d.devicePort, []net.IP{getDeviceIP()}, txtVars)
 	if err != nil {
 		return err
 	}
@@ -51,10 +57,17 @@ func (d *PeerDiscovery) broadcastOurService() error {
 
 func (d *PeerDiscovery) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
-	if peerId == DEVICE_ID {
+	if peerId == d.deviceId {
 		return // ignore ourselves
 	}
 	isMobile := strings.Split(entry.InfoFields[0], "=")[1] == "true"
+
+	// This will be used for perfect negotiation. Being polite will
+	// mean we forego our own offer when we receive an offer from a peer.
+	// Being impolite will mean we ignore the peer's offer and continue with
+	// our own. This way, we avoid collisions by knowing that only one peer
+	// is able to initiate a connection
+	polite := peerId < d.deviceId
 
 	d.mutex.Lock()
 
@@ -66,11 +79,12 @@ func (d *PeerDiscovery) addPeer(entry *mdns.ServiceEntry) {
 			Ip:            entry.AddrV4,
 			Id:            peerId,
 			IsMobile:      isMobile,
+			polite:        polite,
 			udpPort:       entry.Port,
 			lastHeardFrom: time.Now(),
 		}
 		peer.CreateConnection()
-		peer.RunClientAndServer()
+		peer.RunClientAndServer(d.devicePort)
 		peer.SetupDataChannel()
 		d.Peers[peerId] = peer
 	}
@@ -88,13 +102,18 @@ func (d *PeerDiscovery) listenForBroadcasts(eventChannel chan int) error {
 		}
 	}()
 
+	original := log.Writer()
+
 	for {
 		params := mdns.DefaultParams(d.serviceType)
 		params.Entries = entriesChannel
 		params.Timeout = d.queryFrequency
+
+		log.SetOutput(io.Discard) // disable the logging mdns does
 		if err := mdns.Query(params); err != nil {
 			return err
 		}
+		log.SetOutput(original)
 
 		// Remove peers we haven't heard from in a while
 		d.mutex.Lock()

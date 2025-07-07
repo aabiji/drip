@@ -24,9 +24,6 @@ const ( // packet types
 type packet struct {
 	PacketType int
 	Data       []byte
-	// TODO: use these!
-	Recipient string
-	Sender    string
 }
 
 type Peer struct {
@@ -38,6 +35,7 @@ type Peer struct {
 	lastHeardFrom time.Time
 
 	makingOffer bool
+	polite      bool
 	connection  *webrtc.PeerConnection
 	dataChannel *webrtc.DataChannel
 
@@ -45,13 +43,6 @@ type Peer struct {
 	udpPort       int
 	udpConnection *net.UDPConn
 }
-
-// This will be used for perfect negotiation. Being polite will
-// mean we forego our own offer when we receive an offer from a peer.
-// Being impolite will mean we ignore the peer's offer and continue with
-// our own. This way, we avoid collisions by knowing that only one peer
-// is able to initiate a connection
-func (p *Peer) isPolite() bool { return p.Id < DEVICE_ID }
 
 func (p *Peer) Close() {
 	p.dataChannel.GracefulClose()
@@ -98,10 +89,7 @@ func (p *Peer) CreateConnection() {
 			panic(err)
 		}
 
-		p.packetChannel <- packet{
-			PacketType: OFFER_PACKET, Data: jsonOffer,
-			Sender: DEVICE_ID, Recipient: p.Id,
-		}
+		p.packetChannel <- packet{PacketType: OFFER_PACKET, Data: jsonOffer}
 
 		p.makingOffer = false
 	})
@@ -111,21 +99,17 @@ func (p *Peer) CreateConnection() {
 		if err != nil {
 			panic(err)
 		}
-
-		p.packetChannel <- packet{
-			PacketType: ICE_PACKET, Data: jsonCandidate,
-			Sender: DEVICE_ID, Recipient: p.Id,
-		}
+		p.packetChannel <- packet{PacketType: ICE_PACKET, Data: jsonCandidate}
 	})
 }
 
 func (p *Peer) SetupDataChannel() {
-	if p.isPolite() { // on the responder's end of the connection
+	if p.polite { // on the responder's end of the connection
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 			dataChannel.OnOpen(func() {
-				fmt.Println("recipient: data channel opened, can start sending data...")
-				data := []byte("hello :)")
-				dataChannel.Send(data)
+				fmt.Printf("Received a data channel connection from %s\n", p.Id)
+				//data := []byte("hello :)")
+				//dataChannel.Send(data)
 			})
 
 			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -148,9 +132,7 @@ func (p *Peer) SetupDataChannel() {
 	}
 
 	p.dataChannel.OnOpen(func() {
-		fmt.Println("sender: data channel opened, can start sending data...")
-		data := []byte("hello :)")
-		p.dataChannel.Send(data)
+		fmt.Printf("Opened a data channel connection with %s\n", p.Id)
 	})
 
 	p.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
@@ -168,7 +150,7 @@ func (p *Peer) handleOffer(pkt packet) {
 	negotiating := p.connection.SignalingState() != webrtc.SignalingStateStable
 	offerCollision := negotiating || p.makingOffer
 
-	if offerCollision && !p.isPolite() {
+	if offerCollision && !p.polite {
 		return // Ignore the peer's offer and so we can move forward with our own
 	}
 	p.makingOffer = false
@@ -190,10 +172,7 @@ func (p *Peer) handleOffer(pkt packet) {
 	if err != nil {
 		panic(err)
 	}
-	p.packetChannel <- packet{
-		PacketType: ANSWER_PACKET, Data: jsonAnswer,
-		Sender: DEVICE_ID, Recipient: p.Id,
-	}
+	p.packetChannel <- packet{PacketType: ANSWER_PACKET, Data: jsonAnswer}
 }
 
 func (p *Peer) handleAnswer(pkt packet) {
@@ -214,7 +193,7 @@ func (p *Peer) handleICECandidate(pkt packet) {
 	p.connection.AddICECandidate(candidate.ToJSON())
 }
 
-func (p *Peer) RunClientAndServer() {
+func (p *Peer) RunClientAndServer(devicePort int) {
 	bufferSize := 65536
 
 	// reading from the peer's port
@@ -232,7 +211,7 @@ func (p *Peer) RunClientAndServer() {
 	// forward json data written to the channel to the client over UDP
 	// write to our own port
 	go func() {
-		broadcastAddr := &net.UDPAddr{Port: DEVICE_PORT, IP: net.IPv4bcast}
+		broadcastAddr := &net.UDPAddr{Port: devicePort, IP: net.IPv4bcast}
 		for pkt := range p.packetChannel {
 			jsonPacket, err := json.Marshal(pkt)
 			if err != nil {

@@ -37,18 +37,14 @@ func getDeviceName() string {
 }
 
 func getUnusedPort() int {
-	// get the os to give us a random unused address
-	addr := &net.UDPAddr{Port: 0, IP: net.IPv4zero}
+	// get the os to give a random free port
+	addr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
 	conn, err := net.ListenUDP("udp", addr)
 	if err != nil {
 		panic(err)
 	}
-
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).Port
 }
-
-var DEVICE_ID = getDeviceName()
-var DEVICE_PORT = getUnusedPort()
 
 const QUIT = 0 // Event channel value

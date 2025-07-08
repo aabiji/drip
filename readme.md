@@ -18,3 +18,6 @@ When we're finished the basic networking (peer connections, file transfers),
 then work on the gui and other miscellanious code.
 
 TODO: imporve the mdns peer discovery
+
+icons from here:
+https://www.svgrepo.com/collection/jtb-variety-thin-icons/

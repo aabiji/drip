@@ -4,6 +4,9 @@ import { ExampleExportedFunc } from "../wailsjs/go/main/App";
 import uploadIcon from "./assets/upload.svg";
 import fileIcon from "./assets/file.svg";
 import folderIcon from "./assets/folder.svg";
+import sunIcon from "./assets/sun.svg";
+import moonIcon from "./assets/moon.svg";
+import settingsIcon from "./assets/settings.svg";
 
 const Panes = { Share: 0, Received: 1, Settings: 2 };
 
@@ -13,7 +16,7 @@ function SharePane() {
   ];
 
   return (
-    <div class="share-content">
+    <div class="inner-content">
       <div class="devices-container">
         {deviceNames.map((name) => (
           <div class="device-entry">
@@ -48,14 +51,14 @@ function ReceivedPane() {
   ];
 
   return (
-    <div>
+    <div class="transfer-grid">
 
       {transfers.map((transfer) => (
         <div class="transfer-card">
           <img src={transfer.folder ? folderIcon : fileIcon} class="banner" />
           <div class="info">
-            <p> {transfer.sentFrom} </p>
-            <p> {transfer.path} </p>
+            <b> {transfer.path} </b>
+            <p> Sent from {transfer.sentFrom} </p>
           </div>
         </div>
       ))}
@@ -65,37 +68,59 @@ function ReceivedPane() {
 }
 
 function SettingsPane() {
+  const startYear = 2025;
+  const currentYear = new Date().getFullYear();
+  const copyright = startYear == currentYear ? `${startYear}`: `${startYear}-${currentYear}`;
+
+  const [downloadPath, setDownloadPath] = useState("~/Downloads/");
+
+  const [isLightMode, setIsLightMode] = useState(true);
+
   return (
-    <div>
-      <button> Toggle theme </button>
-      <label> Download folder </label>
-      <input type="file" webkitdirectory id="folderInput" />
+    <div class="inner-content">
+      <div class="row">
+        <p class="input-label">Toggle theme</p>
+        <button class="icon-button" onClick={() => setIsLightMode(!isLightMode)}>
+          <img src={isLightMode ? moonIcon : sunIcon} alt="Toggle Theme" />
+        </button>
+      </div>
+
+      <div className="row">
+        <p className="input-label">Download folder</p>
+        <label className="folder-label">
+          <p className="path">{downloadPath}</p>
+          <input type="file" webkitdirectory className="folder-path-input" />
+        </label>
+      </div>
+
+      <p class="copyright">© Abigail Adegbiji @aabiji, {copyright}</p>
     </div>
   );
 }
 
 export default function App() {
-  const [activePane, setActivePane] = useState(Panes.Received);
+  const [activePane, setActivePane] = useState(Panes.Settings);
 
   return (
     <div class="app-wrapper">
       <div class="navbar">
-        <button
-          onClick={() => setActivePane(Panes.Share)}
-          class={activePane == Panes.Share ? "active" : ""}>
-          Share
-        </button>
+        <div class="panes">
+          <button
+            onClick={() => setActivePane(Panes.Share)}
+            class={activePane == Panes.Share ? "active" : ""}>
+            Share
+          </button>
 
-        <button
-          onClick={() => setActivePane(Panes.Received)}
-          class={activePane == Panes.Received ? "active" : ""}>
-          Received
-        </button>
+          <button
+            onClick={() => setActivePane(Panes.Received)}
+            class={activePane == Panes.Received ? "active" : ""}>
+            Received
+          </button>
+        </div>
 
-        <button
-          onClick={() => setActivePane(Panes.Settings)}
-          class={activePane == Panes.Settings ? "active" : ""}>
-          Settings
+        <button class="settings"
+          onClick={() => setActivePane(Panes.Settings)}>
+          <img src={settingsIcon}/>
         </button>
       </div>
 

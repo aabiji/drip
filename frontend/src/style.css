@@ -1,7 +1,9 @@
 :root {
   --green: #78DD22;
-  --light-grey: #aaaaaa;
+  --grey: #aaaaaa;
+  --light-grey: #e0e0e0;
   --accent: #8722DD;
+  --border: #ccc;
 }
 
 html, body, #root {
@@ -16,27 +18,42 @@ html, body, #root {
 }
 
 .navbar {
-  width: 100%;
   display: flex;
-  flex-direction: row;
-  flex-grow: 1;
-  position: sticky;
-  height: 40px;
-  flex-shrink: 0;
+  align-items: center;
+  height: 36px;
+  border-bottom: 1px solid var(--border);
+  padding: 8px 14px;
 }
 
-.navbar button {
-  background-color: rgba(0, 0, 0, 0);
-  font-size: 20px;
-  font-weight: bold;
-  width: 100%;
+.navbar .panes {
+  display: flex;
+}
+
+.navbar .panes button {
+  font-size: 18px;
   border: none;
-  outline: none;
+  background: none;
+  padding: 0 10px;
+  cursor: pointer;
+  padding: 8px 14px;
+}
+
+.navbar .panes .active {
+  background-color: var(--light-grey);
+  border-radius: 6px;
+}
+
+.navbar .settings {
+  margin-left: auto;
+  background: none;
+  border: none;
+  padding: 0;
   cursor: pointer;
 }
 
-.navbar .active {
-  border-bottom: 2px solid var(--accent);
+.navbar .settings img {
+  height: 26px;
+  width: 26px;
 }
 
 .content {
@@ -48,13 +65,14 @@ html, body, #root {
   overflow-y: auto; 
 }
 
-.share-content {
+.inner-content {
   display: flex;
   flex-direction: column;
   flex-grow: 1;
   height: 100%;
 }
 
+/* Share page */
 .devices-container {
   overflow: scroll;
   height: 50%;
@@ -85,7 +103,7 @@ html, body, #root {
   width: 100%;
   height: 100%;
   background-color: white;
-  border: 1px solid var(--light-grey);
+  border: 1px solid var(--grey);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -132,7 +150,7 @@ html, body, #root {
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  border: 2px dotted var(--light-grey);
+  border-top: 2px solid var(--light-grey);
   cursor: pointer;
   position: relative;
   width: 99.5%;
@@ -163,4 +181,89 @@ html, body, #root {
   border: none;
   color: white;
   background-color: var(--accent);
+}
+
+/* Receive files page */
+.transfer-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); /* responsive columns */
+  gap: 16px;
+  padding: 10px;
+}
+
+.transfer-card {
+  border-radius: 6px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.transfer-card .banner {
+  width: auto;
+  height: 70px;
+  object-fit: contain
+}
+
+.transfer-card .info {
+  padding: 10px;
+  text-align: center;
+  font-size: 14px;
+  flex-grow: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* Settings page */
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.icon-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px;
+  display: flex;
+  align-items: center;
+}
+
+.icon-button img {
+  height: 20px;
+  width: 20px;
+}
+
+.input-label {
+  font-weight: bold;
+}
+
+.folder-path-input {
+  display: none;
+}
+
+.folder-label {
+  cursor: pointer;
+  display: inline-block;
+  background-color: var(--light-grey);
+  padding: 8px 14px;
+  border-radius: 8px;
+  transition: background-color 0.2s;
+}
+
+.folder-label:hover {
+  background-color: var(--grey);
+}
+
+.folder-label .path {
+  margin: 0;
+  word-break: break-all;
+}
+
+.copyright {
+  font-size: 13px;
+  margin: 0 auto;
+  margin-top: auto;
+  color: var(--grey);
 }

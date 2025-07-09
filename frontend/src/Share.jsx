@@ -28,6 +28,18 @@ export default function SharePane() {
     });
   };
 
+  const selectFiles = (event) => {
+    setSelectedFiles((prev) => {
+      const files = Array.from(event.target.files);
+      const existing = new Set(prev.map((f) => `${f.name}-${f.size}`));
+      const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
+      return [...prev, ...unique];
+    });
+  }
+
+  const removeFile = (name) =>
+    setSelectedFiles((prev) => prev.filter((f) => f.name != name));
+
   const streamFile = async (file) => {
     const chunkSize = 5 * 1024 * 1024; // 5 megabytes
     const numChunks = Math.ceil(file.size / chunkSize);
@@ -94,8 +106,16 @@ export default function SharePane() {
             <p>Drag and drop or choose files</p>
             <input
               type="file" disabled={!canSend}
-              onChange={(event) => setSelectedFiles(event.target.files)} />
+              onChange={(event) => selectFiles(event)} />
           </label>
+        </div>
+        <div className="file-selection-container">
+          {selectedFiles.map((file, index) => (
+            <div className="file-selection" key={index}>
+              <p> {file.name} </p>
+              <button onClick={() => removeFile(file.name)}> x </button>
+            </div>
+          ))}
         </div>
         <button
           className="send-button" disabled={!canSend}

@@ -1,11 +1,11 @@
 package p2p
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
 	"net"
-	"runtime"
 	"strings"
 	"sync"
 	"time"
@@ -13,7 +13,7 @@ import (
 	"github.com/hashicorp/mdns"
 )
 
-type PeerDiscovery struct {
+type PeerFinder struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
@@ -26,9 +26,9 @@ type PeerDiscovery struct {
 	server             *mdns.Server
 }
 
-func NewPeerDiscovery() PeerDiscovery {
-	return PeerDiscovery{
-		deviceId:           getDeviceName(),
+func NewPeerFinder(debugMode bool) PeerFinder {
+	return PeerFinder{
+		deviceId:           getDeviceName(debugMode),
 		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
 		serviceType:        "_fileshare._tcp.local.",
@@ -37,77 +37,72 @@ func NewPeerDiscovery() PeerDiscovery {
 	}
 }
 
-func (d *PeerDiscovery) broadcastOurService() error {
-	isMobileDevice := runtime.GOOS == "android" || runtime.GOOS == "ios"
-	txtVars := []string{
-		fmt.Sprintf("is_mobile=%t", isMobileDevice),
-	}
-	hostname := fmt.Sprintf("%s.local.", d.deviceId)
+func (f *PeerFinder) broadcastOurService() error {
+	hostname := fmt.Sprintf("%s.local.", f.deviceId)
 
 	service, err := mdns.NewMDNSService(
-		d.deviceId, d.serviceType, "local.", hostname,
-		d.devicePort, []net.IP{getDeviceIP()}, txtVars)
+		f.deviceId, f.serviceType, "local.", hostname,
+		f.devicePort, []net.IP{getDeviceIP()}, []string{})
 	if err != nil {
 		return err
 	}
 
-	d.server, err = mdns.NewServer(&mdns.Config{Zone: service})
+	f.server, err = mdns.NewServer(&mdns.Config{Zone: service})
 	return err
 }
 
-func (d *PeerDiscovery) addPeer(entry *mdns.ServiceEntry) {
+func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
-	if peerId == d.deviceId {
+	if peerId == f.deviceId {
 		return // ignore ourselves
 	}
-	isMobile := strings.Split(entry.InfoFields[0], "=")[1] == "true"
 
 	// This will be used for perfect negotiation. Being polite will
 	// mean we forego our own offer when we receive an offer from a peer.
 	// Being impolite will mean we ignore the peer's offer and continue with
 	// our own. This way, we avoid collisions by knowing that only one peer
 	// is able to initiate a connection
-	polite := peerId < d.deviceId
+	polite := peerId < f.deviceId
 
-	d.mutex.Lock()
+	f.mutex.Lock()
 
-	_, exists := d.Peers[peerId]
+	_, exists := f.Peers[peerId]
 	if exists {
-		d.Peers[peerId].lastHeardFrom = time.Now()
+		f.Peers[peerId].lastHeardFrom = time.Now()
 	} else {
 		peer := &Peer{
 			Ip:            entry.AddrV4,
 			Id:            peerId,
-			IsMobile:      isMobile,
 			polite:        polite,
 			udpPort:       entry.Port,
 			lastHeardFrom: time.Now(),
 		}
-		peer.CreateConnection()
-		peer.RunClientAndServer(d.devicePort)
-		peer.SetupDataChannel()
-		d.Peers[peerId] = peer
+		//peer.CreateConnection()
+		//peer.RunClientAndServer(f.devicePort)
+		//peer.SetupDataChannel()
+		f.Peers[peerId] = peer
 	}
 
-	d.mutex.Unlock()
+	f.mutex.Unlock()
 }
 
 // Listen for broadcasts from other devices every 10 seconds
-func (d *PeerDiscovery) listenForBroadcasts(eventChannel chan int) error {
+func (f *PeerFinder) listenForBroadcasts(eventChannel chan string, ctx context.Context) error {
 	// Start lisening to the broadcasts of other devices
 	entriesChannel := make(chan *mdns.ServiceEntry, 25)
 	go func() {
 		for entry := range entriesChannel {
-			d.addPeer(entry)
+			f.addPeer(entry)
+			eventChannel <- "peers-updated"
 		}
 	}()
 
 	original := log.Writer()
 
 	for {
-		params := mdns.DefaultParams(d.serviceType)
+		params := mdns.DefaultParams(f.serviceType)
 		params.Entries = entriesChannel
-		params.Timeout = d.queryFrequency
+		params.Timeout = f.queryFrequency
 
 		log.SetOutput(io.Discard) // disable the logging mdns does
 		if err := mdns.Query(params); err != nil {
@@ -116,34 +111,32 @@ func (d *PeerDiscovery) listenForBroadcasts(eventChannel chan int) error {
 		log.SetOutput(original)
 
 		// Remove peers we haven't heard from in a while
-		d.mutex.Lock()
-		for key, value := range d.Peers {
-			if time.Since(value.lastHeardFrom) >= d.peerRemovalTimeout {
-				delete(d.Peers, key)
+		f.mutex.Lock()
+		for key, value := range f.Peers {
+			if time.Since(value.lastHeardFrom) >= f.peerRemovalTimeout {
+				delete(f.Peers, key)
 			}
 		}
-		d.mutex.Unlock()
+		f.mutex.Unlock()
 
+		// Stop looping when we receive a shutdown signal
 		select {
-		case event := <-eventChannel:
-			if event == QUIT {
-				close(entriesChannel)
-				return nil
-			}
+		case <-ctx.Done():
+			return ctx.Err()
 		default:
 			continue
 		}
 	}
 }
 
-func (d *PeerDiscovery) Run(eventChannel chan int) error {
-	if err := d.broadcastOurService(); err != nil {
+func (f *PeerFinder) Run(eventChannel chan string, ctx context.Context) error {
+	if err := f.broadcastOurService(); err != nil {
 		return err
 	}
 
-	if err := d.listenForBroadcasts(eventChannel); err != nil {
+	if err := f.listenForBroadcasts(eventChannel, ctx); err != nil {
 		return err
 	}
 
-	return d.server.Shutdown()
+	return f.server.Shutdown()
 }

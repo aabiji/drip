@@ -16,9 +16,13 @@ export default function TransferRequest({ open, onClose }) {
   return (
     <dialog ref={dialogRef} onClose={onClose}>
       <h2>So and so wants to send you some files</h2>
-      <div class="button-row">
-        <button class="accept" onClick={onClose}>Accept</button>
-        <button class="decline" onClick={onClose}>Decline</button>
+      <div className="button-row">
+        <button className="accept" onClick={onClose}>
+          Accept
+        </button>
+        <button className="decline" onClick={onClose}>
+          Decline
+        </button>
       </div>
     </dialog>
   );

@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"net"
 	"os"
-	"strings"
 )
 
 func getDeviceIP() net.IP {
@@ -20,11 +19,8 @@ func getDeviceIP() net.IP {
 	return localAddr.IP
 }
 
-// if the DRIP_DEBUG environment variable is set, this will return
-// a ranomized name instead of the actual host name to facilitate testing
-func getDeviceName() string {
-	debug := strings.Trim(os.Getenv("DRIP_DEBUG"), " ")
-	if len(debug) > 0 {
+func getDeviceName(debugMode bool) string {
+	if debugMode {
 		id := rand.Intn(1000000)
 		return fmt.Sprintf("peer-%d", id)
 	}
@@ -46,5 +42,3 @@ func getUnusedPort() int {
 	defer conn.Close()
 	return conn.LocalAddr().(*net.UDPAddr).Port
 }
-
-const QUIT = 0 // Event channel value

@@ -29,7 +29,6 @@ type packet struct {
 type Peer struct {
 	Ip              net.IP
 	Id              string
-	IsMobile        bool
 	ConnectionState int
 
 	lastHeardFrom time.Time

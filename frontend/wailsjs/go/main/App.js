@@ -5,3 +5,11 @@
 export function GetPeers() {
   return window['go']['main']['App']['GetPeers']();
 }
+
+export function SendFileChunk(arg1) {
+  return window['go']['main']['App']['SendFileChunk'](arg1);
+}
+
+export function StartFileTransfer(arg1) {
+  return window['go']['main']['App']['StartFileTransfer'](arg1);
+}

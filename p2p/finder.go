@@ -32,7 +32,7 @@ func NewPeerFinder(debugMode bool) PeerFinder {
 		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
 		serviceType:        "_fileshare._tcp.local.",
-		peerRemovalTimeout: time.Minute * 3,
+		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
 	}
 }

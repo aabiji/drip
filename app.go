@@ -24,14 +24,17 @@ func NewApp() *App {
 
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
+
+	// launch the peer finder service
 	go func() {
 		if err := a.finder.Run(a.events, a.ctx); err != nil {
 			panic(err)
 		}
 	}()
+
+	// launch the event emitter service
 	go func() {
 		for event := range a.events {
-			fmt.Println(a.GetPeers())
 			runtime.EventsEmit(a.ctx, event)
 		}
 	}()
@@ -43,4 +46,14 @@ func (a *App) GetPeers() []string {
 		names = append(names, name)
 	}
 	return names
+}
+
+func (a *App) StartFileTransfer(info p2p.TransferInfo) bool {
+	fmt.Println("starting file transfer", info)
+	return true
+}
+
+func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
+	fmt.Println("getting chunk", chunk)
+	return true
 }

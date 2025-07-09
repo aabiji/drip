@@ -2,7 +2,9 @@ import { useEffect, useState } from "react";
 import uploadIcon from "./assets/upload.svg";
 
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { GetPeers } from "../wailsjs/go/main/App";
+import {
+  GetPeers, StartFileTransfer, SendFileChunk
+} from "../wailsjs/go/main/App";
 
 export default function SharePane() {
   const [peers, setPeers] = useState([]);
@@ -14,16 +16,66 @@ export default function SharePane() {
     EventsOn("peers-updated", () => GetPeers().then((names) => setPeers(names)));
   }, []);
 
+  const [selectedPeers, setSelectedPeers] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+
+  const selectPeer = (event, name) => {
+    setSelectedPeers((prev) => {
+      const list = event.target.checked
+        ? [...prev, name]
+        : prev.filter((peer) => peer != name);
+      return list;
+    });
+  };
+
+  const streamFile = async (file) => {
+    const chunkSize = 5 * 1024 * 1024; // 5 megabytes
+    const numChunks = Math.ceil(file.size / chunkSize);
+    const info = { recipients: selectedPeers, name: file.name, size: file.size, numChunks };
+
+    const ok = StartFileTransfer(info);
+    if (!ok) {
+      console.log("tell the user the error!");
+      return;
+    }
+
+    for (let i = 0; i < numChunks; i++) {
+      const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
+      const chunkData = new Uint8Array(await slice.arrayBuffer());
+      const chunk = { data: Array.from(chunkData), chunkIndex: i };
+      const ok = await SendFileChunk(chunk);
+      if (!ok) {
+        console.log("tell the user the error!"); // TODO: stop!
+        return;
+      }
+    }
+
+    // TODO: redirect to upload page
+  };
+
+  const sendFiles = async () => {
+    if (selectedFiles.length == 0 || selectedPeers.length == 0) return;
+    try {
+      for (const file of selectedFiles) {
+        await streamFile(file);
+      }
+    } catch (error) {
+      console.log("tell the user the error!");
+    }
+  };
+
   return (
     <div className="inner-content">
       <div className="upper-container">
         <h3> Send to </h3>
         {canSend ? (
-          <div className="devices-container">
+          <div className="peers-container">
             {peers.map((name, index) => (
-              <div className="device-entry" key={index}>
+              <div className="peer-entry" key={index}>
                 <label className="custom-checkbox">
-                  <input type="checkbox" className="checkbox" />
+                  <input
+                    type="checkbox" className="checkbox"
+                    onChange={(event) => selectPeer(event, name)} />
                   <span className="fake-checkbox"></span>
                 </label>
                 <p>{name}</p>
@@ -40,12 +92,14 @@ export default function SharePane() {
           <label className={canSend ? "file-label" : "file-label disabled"}>
             <img src={uploadIcon} className="upload-icon" alt="Upload" />
             <p>Drag and drop or choose files</p>
-            <input type="file" disabled={!canSend} />
+            <input
+              type="file" disabled={!canSend}
+              onChange={(event) => setSelectedFiles(event.target.files)} />
           </label>
         </div>
-        <button className="send-button" disabled={!canSend}>
-          Send
-        </button>
+        <button
+          className="send-button" disabled={!canSend}
+          onClick={sendFiles}>Send</button>
       </div>
     </div>
   );

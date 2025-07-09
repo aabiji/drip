@@ -106,12 +106,12 @@ body,
   flex-direction: column;
 }
 
-.devices-container {
+.peers-container {
   overflow: scroll;
   flex-grow: 1;
 }
 
-.device-entry {
+.peer-entry {
   display: flex;
   align-items: center;
   margin-bottom: 8px;
@@ -121,7 +121,7 @@ body,
   border-radius: 8px;
 }
 
-.device-entry:hover {
+.peer-entry:hover {
   border: 1px solid var(--accent);
 }
 

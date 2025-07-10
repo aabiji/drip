@@ -1,5 +1,5 @@
-import fileIcon from "./assets/file.svg";
-import folderIcon from "./assets/folder.svg";
+import { ReactComponent as FileIcon } from "./assets/file.svg";
+import { ReactComponent as FolderIcon } from "./assets/folder.svg";
 
 export default function ReceivedFiles() {
   const transfers = [
@@ -12,7 +12,10 @@ export default function ReceivedFiles() {
     <div className="transfer-grid">
       {transfers.map((transfer, index) => (
         <div className="transfer-card" key={index}>
-          <img src={transfer.folder ? folderIcon : fileIcon} className="banner" />
+          {transfer.folder
+            ? <FolderIcon className="banner" />
+            : <FileIcon className="banner" />
+          }
           <div className="info">
             <b> {transfer.path} </b>
             <p> Sent from {transfer.sentFrom} </p>

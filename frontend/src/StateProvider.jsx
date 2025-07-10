@@ -16,6 +16,10 @@ export default function StateProvider({ children }) {
   const defaultLight = window.matchMedia('(prefers-color-scheme: light)').matches;
   const [theme, setTheme] = useState(defaultLight ? "light" : "dark");
 
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
       <PeersContext.Provider value={peers}>{children}</PeersContext.Provider>

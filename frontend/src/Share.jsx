@@ -2,7 +2,7 @@ import { useContext, useEffect, useState } from "react";
 import { StartFileTransfer, SendFileChunk } from "../wailsjs/go/main/App";
 import { PeersContext } from "./StateProvider";
 
-import uploadIcon from "./assets/upload.svg";
+import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
 export default function SharePane() {
   const peers = useContext(PeersContext);
@@ -97,7 +97,7 @@ export default function SharePane() {
       <div className="upload-container">
         <div className="file-input-container">
           <label className={canSend ? "file-label" : "file-label disabled"}>
-            <img src={uploadIcon} className="upload-icon" alt="Upload" />
+            <UploadIcon className="upload-icon" />
             <p>Drag and drop or choose files</p>
             <input
               type="file" disabled={!canSend}

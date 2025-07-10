@@ -1,40 +1,35 @@
-/* FIXME: this isn't right... */
 /* Light mode colors */
 [data-theme="light"] {
-  --green: #4caf50;
-  --dark-green: #388e3c;
-  --red: #e53935;
-  --grey: #b0b0b0;
-  --white: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --background: #f5f5f7;
-  --foreground: #1d1d1f;
+  --green-500:  #4caf50;
+  --green-600:  #388e3c;
+  --red-500:    #e53935;
+  --bg-400:     #ffffff;
+  --bg-500:     #f5f5f7;
+  --fg-500:     #1d1d1f;
+  --grey-400:   #0000001a;
+  --grey-500:   #b0b0b0;
   --accent-200: #D6E9FF;
   --accent-300: #C2DEFF;
   --accent-400: #5cabff;
   --accent-500: #007aff;
-  --accent-filter-500: invert(48%) sepia(98%) saturate(5034%) hue-rotate(200deg)
-    brightness(100%) contrast(104%);
   --accent-600: #0051c7;
 }
 
-/* Dark mode colors TODO: fix */
+/* Dark mode colors */
 [data-theme="dark"] {
-  --green: #4caf50;
-  --dark-green: #388e3c;
-  --red: #e53935;
-  --grey: #b0b0b0;
-  --white: #ffffff;
-  --border: rgba(0, 0, 0, 0.1);
-  --background: #000000;
-  --foreground: #1d1d1f;
-  --accent-200: #D6E9FF;
-  --accent-300: #C2DEFF;
-  --accent-400: #5cabff;
-  --accent-500: #007aff;
-  --accent-filter-500: invert(48%) sepia(98%) saturate(5034%) hue-rotate(200deg)
-    brightness(100%) contrast(104%);
-  --accent-600: #0051c7;
+  --green-600:  #a5d6a7;
+  --green-500:  #81c784;
+  --red-500:    #ef5350;
+  --bg-500:     #121212;
+  --bg-400:     #0a0a0a;
+  --fg-500:     #f5f5f7;
+  --grey-400:   #ffffff1a;
+  --grey-500:   #999999;
+  --accent-200: #13293D;
+  --accent-300: #294B70;
+  --accent-400: #3B73A0;
+  --accent-500: #82baff;
+  --accent-600: #b9dcff;
 }
 
 html,
@@ -42,8 +37,8 @@ body,
 #root {
   height: 100%;
   margin: 0;
-  background-color: var(--background);
-  color: var(--foreground);
+  background-color: var(--bg-500);
+  color: var(--fg-500);
   font-family:
     -apple-system, BlinkMacSystemFont, "San Francisco", "Helvetica Neue",
     sans-serif;
@@ -65,11 +60,10 @@ body,
   display: flex;
   justify-content: space-between;
   align-items: center;
-  background-color: rgba(255, 255, 255, 0.8);
-  backdrop-filter: blur(10px);
   padding: 8px 16px;
   padding-left: 0;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--grey-400);
+  background-color: var(--bg-400);
 }
 
 .navbar .panes {
@@ -86,6 +80,7 @@ body,
   cursor: pointer;
   border-radius: 4px;
   transition: background-color 0.15s ease;
+  color: var(--fg-500);
 }
 
 .navbar button.active {
@@ -93,23 +88,22 @@ body,
   font-weight: bold;
 }
 
-.navbar .settings img {
+.navbar .settings-icon {
   width: 24px;
   height: 24px;
   opacity: 0.6;
-  transition: opacity 0.15s ease;
+  fill: var(--fg-500);
 }
 
-.navbar .settings img:hover {
-  filter: var(--accent-filter-500);
+.navbar .settings-icon:hover {
+  fill: var(--accent-500);
 }
 
-.navbar .settings-active img {
+.navbar .settings-active-icon {
   width: 24px;
   height: 24px;
   opacity: 0.6;
-  transition: opacity 0.15s ease;
-  filter: var(--accent-filter-500);
+  fill: var(--accent-500);
 }
 
 .content {
@@ -144,9 +138,9 @@ body,
   display: flex;
   align-items: center;
   margin-bottom: 8px;
-  background-color: var(--white);
+  background-color: var(--bg-400);
   padding-left: 20px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--grey-400);
   border-radius: 8px;
 }
 
@@ -171,8 +165,8 @@ body,
 .fake-checkbox {
   width: 100%;
   height: 100%;
-  background-color: var(--white);
-  border: 1px solid var(--grey);
+  background-color: var(--bg-400);
+  border: 1px solid var(--grey-500);
   border-radius: 50%;
   display: flex;
   align-items: center;
@@ -180,7 +174,7 @@ body,
   cursor: pointer;
   transition: background-color 0.2s;
   font-size: 24px;
-  color: var(--white);
+  color: var(--bg-400);
 }
 
 .fake-checkbox::before {
@@ -193,8 +187,8 @@ body,
 }
 
 .checkbox:checked + .fake-checkbox {
-  background-color: var(--green);
-  border: 1px solid var(--green);
+  background-color: var(--green-500);
+  border: 1px solid var(--green-500);
 }
 
 .checkbox:checked + .fake-checkbox::before {
@@ -205,6 +199,7 @@ body,
 .upload-icon {
   height: 100px;
   width: auto;
+  fill: var(--grey-500);
   margin-bottom: 10px;
 }
 
@@ -225,7 +220,7 @@ body,
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  background-color: var(--white);
+  background-color: var(--bg-400);
   border: 1px dashed #8e8e93;
   cursor: pointer;
   position: relative;
@@ -238,7 +233,7 @@ body,
 }
 
 .file-label.disabled {
-  background-color: var(--background);
+  background-color: var(--bg-500);
   cursor: not-allowed;
 }
 
@@ -294,7 +289,7 @@ body,
   font-size: 16px;
   cursor: pointer;
   border: none;
-  color: var(--white);
+  color: var(--bg-400);
   background-color: var(--accent-500);
   border-radius: 6px;
   flex-grow: 0;
@@ -323,8 +318,8 @@ body,
   overflow: hidden;
   display: flex;
   flex-direction: column;
-  background-color: var(--white);
-  border: 1px solid var(--border);
+  background-color: var(--bg-400);
+  border: 1px solid var(--grey-400);
   padding-top: 10px;
 }
 
@@ -332,6 +327,7 @@ body,
   width: auto;
   height: 70px;
   object-fit: contain;
+  fill: var(--grey-500);
 }
 
 .transfer-card .info {
@@ -342,6 +338,7 @@ body,
   display: flex;
   flex-direction: column;
   justify-content: space-between;
+  color: var(--fg-500);
 }
 
 /* Settings page */
@@ -353,8 +350,8 @@ body,
 
 .row button,
 .folder-label {
-  background-color: var(--white);
-  border: 1px solid var(--border);
+  background-color: var(--bg-400);
+  border: 1px solid var(--grey-400);
   border-radius: 6px;
 }
 
@@ -372,9 +369,10 @@ body,
   align-items: center;
 }
 
-.icon-button img {
+.icon-button-svg {
   height: 20px;
   width: 20px;
+  fill: var(--fg-500);
 }
 
 .input-label {
@@ -389,7 +387,6 @@ body,
   cursor: pointer;
   display: inline-block;
   padding: 4px 14px;
-  transition: background-color 0.2s;
 }
 
 .folder-label .path {
@@ -404,7 +401,7 @@ body,
 /* Modal popup */
 dialog {
   border: none;
-  background-color: var(--white);
+  background-color: var(--bg-400);
   padding: 30px 30px 0px 30px;
   margin: 0 auto;
   transition: transform 0.3s ease;
@@ -424,25 +421,25 @@ dialog::backdrop {
 
 .button-row button {
   flex-grow: 1;
-  background-color: var(--white);
+  background-color: var(--bg-400);
   border: none;
   outline: none;
   font-size: 18px;
   cursor: pointer;
   font-weight: bold;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--grey-400);
   padding: 8px;
 }
 
 .button-row button:hover {
-  background-color: var(--border);
+  background-color: var(--grey-400);
 }
 
 .button-row .accept {
-  color: var(--dark-green);
-  border-right: 1px solid var(--border);
+  color: var(--green-600);
+  border-right: 1px solid var(--grey-400);
 }
 
 .button-row .decline {
-  color: var(--red);
+  color: var(--red-500);
 }

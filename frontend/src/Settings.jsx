@@ -1,8 +1,8 @@
 import { useContext, useState } from "react";
 import { ThemeContext } from "./StateProvider";
 
-import sunIcon from "./assets/sun.svg";
-import moonIcon from "./assets/moon.svg";
+import { ReactComponent as SunIcon } from "./assets/sun.svg";
+import { ReactComponent as MoonIcon } from "./assets/moon.svg";
 
 export default function Settings() {
   const startYear = 2025;
@@ -22,7 +22,10 @@ export default function Settings() {
           className="icon-button"
           onClick={() => setTheme(theme == "light" ? "dark" : "light")}
         >
-          <img src={theme == "light" ? moonIcon : sunIcon} alt="Toggle Theme" />
+          {theme == "light"
+            ? <MoonIcon className="icon-button-svg" />
+            : <SunIcon className="icon-button-svg" />
+          }
         </button>
       </div>
 

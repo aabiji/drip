@@ -1,4 +1,6 @@
-:root {
+/* FIXME: this isn't right... */
+/* Light mode colors */
+[data-theme="light"] {
   --green: #4caf50;
   --dark-green: #388e3c;
   --red: #e53935;
@@ -6,6 +8,25 @@
   --white: #ffffff;
   --border: rgba(0, 0, 0, 0.1);
   --background: #f5f5f7;
+  --foreground: #1d1d1f;
+  --accent-200: #D6E9FF;
+  --accent-300: #C2DEFF;
+  --accent-400: #5cabff;
+  --accent-500: #007aff;
+  --accent-filter-500: invert(48%) sepia(98%) saturate(5034%) hue-rotate(200deg)
+    brightness(100%) contrast(104%);
+  --accent-600: #0051c7;
+}
+
+/* Dark mode colors TODO: fix */
+[data-theme="dark"] {
+  --green: #4caf50;
+  --dark-green: #388e3c;
+  --red: #e53935;
+  --grey: #b0b0b0;
+  --white: #ffffff;
+  --border: rgba(0, 0, 0, 0.1);
+  --background: #000000;
   --foreground: #1d1d1f;
   --accent-200: #D6E9FF;
   --accent-300: #C2DEFF;

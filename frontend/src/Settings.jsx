@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { useContext, useState } from "react";
+import { ThemeContext } from "./StateProvider";
 
 import sunIcon from "./assets/sun.svg";
 import moonIcon from "./assets/moon.svg";
@@ -9,9 +10,9 @@ export default function Settings() {
   const copyright =
     startYear == currentYear ? `${startYear}` : `${startYear}-${currentYear}`;
 
-  const [downloadPath, setDownloadPath] = useState("~/Downloads/");
+  const [downloadPath, _setDownloadPath] = useState("~/Downloads/");
 
-  const [isLightMode, setIsLightMode] = useState(true);
+  const { theme, setTheme } = useContext(ThemeContext);
 
   return (
     <div className="inner-content">
@@ -19,9 +20,9 @@ export default function Settings() {
         <p className="input-label">Toggle theme</p>
         <button
           className="icon-button"
-          onClick={() => setIsLightMode(!isLightMode)}
+          onClick={() => setTheme(theme == "light" ? "dark" : "light")}
         >
-          <img src={isLightMode ? moonIcon : sunIcon} alt="Toggle Theme" />
+          <img src={theme == "light" ? moonIcon : sunIcon} alt="Toggle Theme" />
         </button>
       </div>
 

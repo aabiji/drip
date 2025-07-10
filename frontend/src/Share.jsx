@@ -1,20 +1,15 @@
-import { useEffect, useState } from "react";
+import { useContext, useEffect, useState } from "react";
+import { StartFileTransfer, SendFileChunk } from "../wailsjs/go/main/App";
+import { PeersContext } from "./StateProvider";
+
 import uploadIcon from "./assets/upload.svg";
 
-import { EventsOn } from "../wailsjs/runtime/runtime";
-import {
-  GetPeers, StartFileTransfer, SendFileChunk
-} from "../wailsjs/go/main/App";
-
 export default function SharePane() {
-  const [peers, setPeers] = useState([]);
+  const peers = useContext(PeersContext);
   const [canSend, setCanSend] = useState(true);
 
   // Fetch list of peers from the backend
   useEffect(() => { setCanSend(peers && peers.length > 0) }, [peers]);
-  useEffect(() => {
-    EventsOn("peers-updated", () => GetPeers().then((names) => setPeers(names)));
-  }, []);
 
   const [selectedPeers, setSelectedPeers] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);

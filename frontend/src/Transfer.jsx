@@ -28,17 +28,15 @@ function FileEntry({ name, progress, onClick }) {
   );
 }
 
-function FileAndPeerSelection({
-  peers, startSending, setSelectedPeers,
-  selectedFiles, setSelectedFiles
-}) {
+function FileAndPeerSelection({ state }) {
+  const peers = useContext(PeersContext);
   const [canSend, setCanSend] = useState(true);
 
   // Fetch list of peers from the backend
   useEffect(() => { setCanSend(peers && peers.length > 0) }, [peers]);
 
   const selectPeer = (event, name) => {
-    setSelectedPeers((prev) => {
+    state.setSelectedPeers((prev) => {
       const list = event.target.checked
         ? [...prev, name]
         : prev.filter((peer) => peer != name);
@@ -46,17 +44,31 @@ function FileAndPeerSelection({
     });
   };
 
-  const selectFiles = (event) => {
-    setSelectedFiles((prev) => {
-      const files = Array.from(event.target.files);
+  const addNonDuplicateFiles = (files) => {
+    state.setSelectedFiles((prev) => {
       const existing = new Set(prev.map((f) => `${f.name}-${f.size}`));
-      const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`)); // ignore duplicates
+      const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
       return [...prev, ...unique];
     });
-  }
+  };
 
   const removeFile = (name) =>
-    setSelectedFiles((prev) => prev.filter((f) => f.name != name));
+    state.setSelectedFiles((prev) => prev.filter((f) => f.name != name));
+
+  const dragOverHandler = (event) => { event.preventDefault(); }
+
+  const dropHandler = (event) => {
+    event.preventDefault();
+    let files = [];
+    if (event.dataTransfer.items) {
+      files = Array.from(event.dataTransfer.items)
+                .filter((item) => item.kind === "file")
+                .map((item) => item.getAsFile());
+    } else {
+      files = event.dataTransfer.files;
+    }
+    addNonDuplicateFiles(files);
+  };
 
   return (
     <div className="inner-content">
@@ -82,23 +94,26 @@ function FileAndPeerSelection({
       </div>
 
       <div className="upload-container">
-        <div className="file-input-container">
+        <div
+          className="file-input-container"
+          onDrop={(event) => dropHandler(event)}
+          onDragOver={(event) => dragOverHandler(event)}>
           <label className={canSend ? "file-label" : "file-label disabled"}>
             <UploadIcon className="upload-icon" />
             <p>Drag and drop or choose files</p>
             <input
               type="file" disabled={!canSend}
-              onChange={(event) => selectFiles(event)} />
+              onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
           </label>
         </div>
         <div className="file-selection-container">
-          {selectedFiles.map((file, index) => (
+          {state.selectedFiles.map((file, index) => (
             <FileEntry key={index} name={file.name} onClick={() => removeFile(file.name)} />
           ))}
         </div>
         <button
           className="send-button" disabled={!canSend}
-          onClick={startSending}>Send</button>
+          onClick={() => state.setSending(true)}>Send</button>
       </div>
     </div>
   );
@@ -117,16 +132,11 @@ function ErrorMessage({ message, onRetry }) {
   );
 }
 
-export default function TransferPane() {
-  const peers = useContext(PeersContext);
-  const [selectedPeers, setSelectedPeers] = useState([]);
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [sending, setSending] = useState(true);
-
+export default function TransferPane({ state }) {
   const streamFile = async (file) => {
     const chunkSize = 5 * 1024 * 1024; // 5 megabytes
     const numChunks = Math.ceil(file.size / chunkSize);
-    const info = { recipients: selectedPeers, name: file.name, size: file.size, numChunks };
+    const info = { recipients: state.selectedPeers, name: file.name, size: file.size, numChunks };
 
     const ok = StartFileTransfer(info);
     if (!ok) {
@@ -149,9 +159,10 @@ export default function TransferPane() {
   };
 
   const sendFiles = async () => {
-    if (selectedFiles.length == 0 || selectedPeers.length == 0) return;
+    if (state.selectedFiles.length == 0 || state.selectedPeers.length == 0) return;
     try {
-      for (const file of selectedFiles) {
+      state.setPercentages(Array(state.selectedFiles.length).fill(0));
+      for (const file of state.selectedFiles) {
         await streamFile(file);
       }
     } catch (error) {
@@ -160,38 +171,31 @@ export default function TransferPane() {
   };
 
   const startSending = async () => {
-    setSending(true);
+    state.setSending(true);
     await sendFiles();
   };
 
   const stopSending = () => {
-    setSending(false);
+    state.setPercentages([]);
+    state.setSending(false);
+    // TODO: stop file transfers
   };
 
   return (
     <div className="inner-content">
-      {!sending &&
-        <FileAndPeerSelection
-          peers={peers} startSending={startSending} setSelectedFiles={setSelectedFiles}
-          selectedFiles={selectedFiles} setSelectedPeers={setSelectedPeers}
-        />
-      }
-      {sending &&
+      {!state.sending && <FileAndPeerSelection state={state} />}
+      {state.sending &&
         <div class="inner-content">
           <div class="status-top-row">
             <button onClick={() => stopSending()}> Cancel </button>
             <h1> Sending </h1>
           </div>
           <div className="progress-container">
-            <FileEntry name={"File A"} progress={0.5} />
-            <FileEntry name={"File B"} progress={0.4} />
-            <FileEntry name={"File C"} progress={0.8} />
+            {state.percentages.map((p, index) =>
+              <FileEntry name={state.selectedFiles[index].name} progress={p} />
+            )}
           </div>
-          <div className="error-tray">
-            <ErrorMessage message={"this is the first error!"}/>
-            <ErrorMessage
-              message={"this is the second error!"} onRetry={() => console.log("hello!")}/>
-          </div>
+          <div className="error-tray">{/* TODO: error messages go here */}</div>
         </div>
       }
     </div>

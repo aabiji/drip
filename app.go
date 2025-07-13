@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -11,14 +10,18 @@ import (
 type App struct {
 	ctx context.Context
 
-	events chan string
-	finder p2p.PeerFinder
+	events          chan string
+	transferService p2p.TransferService
+	finder          p2p.PeerFinder
 }
 
 func NewApp() *App {
+	t := p2p.NewTransferService()
+
 	return &App{
-		events: make(chan string, 10),
-		finder: p2p.NewPeerFinder(true),
+		events:          make(chan string, 10),
+		transferService: t,
+		finder:          p2p.NewPeerFinder(true, &t),
 	}
 }
 
@@ -48,12 +51,24 @@ func (a *App) GetPeers() []string {
 	return names
 }
 
-func (a *App) StartFileTransfer(info p2p.TransferInfo) bool {
-	fmt.Println("starting file transfer", info)
-	return true
+func (a *App) StartFileTransfer(info p2p.TransferInfo) {
+	msg := p2p.NewMessage(p2p.TRANSFER_START, info)
+
+	for _, peerId := range info.Recipients {
+		exists := a.finder.ConnectToPeer(peerId)
+		if exists {
+			a.transferService.Pending[peerId] <- msg
+		}
+	}
 }
 
-func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
-	fmt.Println("getting chunk", chunk)
-	return true
+func (a *App) SendFileChunk(chunk p2p.FileChunk) {
+	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
+
+	for _, peerId := range chunk.Recipients {
+		exists := a.finder.ConnectToPeer(peerId)
+		if exists {
+			a.transferService.Pending[peerId] <- msg
+		}
+	}
 }

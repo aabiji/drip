@@ -17,6 +17,8 @@ type PeerFinder struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
+	transferService *TransferService
+
 	deviceId    string
 	devicePort  int
 	serviceType string
@@ -26,7 +28,7 @@ type PeerFinder struct {
 	server             *mdns.Server
 }
 
-func NewPeerFinder(debugMode bool) PeerFinder {
+func NewPeerFinder(debugMode bool, t *TransferService) PeerFinder {
 	return PeerFinder{
 		deviceId:           getDeviceName(debugMode),
 		devicePort:         getUnusedPort(),
@@ -34,7 +36,21 @@ func NewPeerFinder(debugMode bool) PeerFinder {
 		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
+		transferService:    t,
 	}
+}
+
+func (f *PeerFinder) ConnectToPeer(id string) bool {
+	peer, ok := f.Peers[id]
+	if !ok {
+		return false // Not aware of the peer -- TODO: how to handle?
+	}
+	if peer.ConnectionState == DISCONNECTED {
+		peer.CreateConnection()
+		peer.RunClientAndServer(f.devicePort)
+		peer.SetupDataChannel()
+	}
+	return true
 }
 
 func (f *PeerFinder) broadcastOurService() error {
@@ -71,16 +87,15 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 		f.Peers[peerId].lastHeardFrom = time.Now()
 	} else {
 		peer := &Peer{
-			Ip:            entry.AddrV4,
-			Id:            peerId,
-			polite:        polite,
-			udpPort:       entry.Port,
-			lastHeardFrom: time.Now(),
+			Ip:              entry.AddrV4,
+			Id:              peerId,
+			polite:          polite,
+			udpPort:         entry.Port,
+			lastHeardFrom:   time.Now(),
+			transferService: f.transferService,
 		}
-		//peer.CreateConnection()
-		//peer.RunClientAndServer(f.devicePort)
-		//peer.SetupDataChannel()
 		f.Peers[peerId] = peer
+		f.transferService.AddPeer(peerId)
 	}
 
 	f.mutex.Unlock()

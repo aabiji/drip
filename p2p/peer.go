@@ -21,11 +21,7 @@ const ( // packet types
 	ICE_PACKET    = 2
 )
 
-type packet struct {
-	PacketType int
-	Data       []byte
-}
-
+// TODO: this is doing way too much stuff...refactor
 type Peer struct {
 	Ip              net.IP
 	Id              string
@@ -38,9 +34,11 @@ type Peer struct {
 	connection  *webrtc.PeerConnection
 	dataChannel *webrtc.DataChannel
 
-	packetChannel chan packet
+	packetQueue   chan Message
 	udpPort       int
 	udpConnection *net.UDPConn
+
+	transferService *TransferService
 }
 
 func (p *Peer) Close() {
@@ -55,7 +53,7 @@ func (p *Peer) CreateConnection() {
 	if err != nil {
 		panic(err)
 	}
-	p.packetChannel = make(chan packet, 25)
+	p.packetQueue = make(chan Message, 25)
 
 	p.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		switch state {
@@ -83,68 +81,57 @@ func (p *Peer) CreateConnection() {
 		}
 		p.connection.SetLocalDescription(offer)
 
-		jsonOffer, err := json.Marshal(offer)
-		if err != nil {
-			panic(err)
-		}
-
-		p.packetChannel <- packet{PacketType: OFFER_PACKET, Data: jsonOffer}
-
+		p.packetQueue <- NewMessage(OFFER_PACKET, offer)
 		p.makingOffer = false
 	})
 
 	p.connection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		jsonCandidate, err := json.Marshal(i)
-		if err != nil {
-			panic(err)
-		}
-		p.packetChannel <- packet{PacketType: ICE_PACKET, Data: jsonCandidate}
+		p.packetQueue <- NewMessage(ICE_PACKET, i)
 	})
+}
+
+func (p *Peer) dataChannelSender() {
+	// send pending messages over the data channel
+	for msg := range p.transferService.Pending[p.Id] {
+		p.dataChannel.Send(msg.Serialize())
+	}
+}
+
+func (p *Peer) dataChannelReceiver(channelMsg webrtc.DataChannelMessage) {
+	msg := Message{}
+	err := json.Unmarshal(channelMsg.Data, &msg)
+	if err != nil {
+		panic(err)
+	}
+	response := p.transferService.HandleMessage(msg)
+	p.dataChannel.Send(response.Serialize())
+}
+
+func (p *Peer) dataChannelClose() {
+	fmt.Println("data channel closed...handle cleanup")
 }
 
 func (p *Peer) SetupDataChannel() {
 	if p.polite { // on the responder's end of the connection
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-			dataChannel.OnOpen(func() {
-				fmt.Printf("Received a data channel connection from %s\n", p.Id)
-				//data := []byte("hello :)")
-				//dataChannel.Send(data)
-			})
-
-			dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-				fmt.Println("received data: ", msg.Data)
-			})
-
-			//err := dataChannel.Close()
-			dataChannel.OnClose(func() {
-				fmt.Println("data channel closed...handle cleanup")
-			})
+			p.dataChannel = dataChannel
+			p.dataChannel.OnOpen(p.dataChannelSender)
+			p.dataChannel.OnMessage(p.dataChannelReceiver)
+			p.dataChannel.OnClose(p.dataChannelClose)
 		})
-		return
+	} else { // on the initiator's end of the connection
+		var err error
+		p.dataChannel, err = p.connection.CreateDataChannel("data", nil)
+		if err != nil {
+			panic(err)
+		}
+		p.dataChannel.OnOpen(p.dataChannelSender)
+		p.dataChannel.OnMessage(p.dataChannelReceiver)
+		p.dataChannel.OnClose(p.dataChannelClose)
 	}
-
-	// on the initiator's end of the connection
-	var err error
-	p.dataChannel, err = p.connection.CreateDataChannel("data", nil)
-	if err != nil {
-		panic(err)
-	}
-
-	p.dataChannel.OnOpen(func() {
-		fmt.Printf("Opened a data channel connection with %s\n", p.Id)
-	})
-
-	p.dataChannel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		fmt.Println("received data: ", msg.Data)
-	})
-
-	//err := dataChannel.Close()
-	p.dataChannel.OnClose(func() {
-		fmt.Println("data channel closed...handle cleanup")
-	})
 }
 
-func (p *Peer) handleOffer(pkt packet) {
+func (p *Peer) handleOffer(msg Message) {
 	// are we getting an offer in the middle of sending ours?
 	negotiating := p.connection.SignalingState() != webrtc.SignalingStateStable
 	offerCollision := negotiating || p.makingOffer
@@ -155,7 +142,7 @@ func (p *Peer) handleOffer(pkt packet) {
 	p.makingOffer = false
 
 	var offer webrtc.SessionDescription
-	err := json.Unmarshal(pkt.Data, &offer)
+	err := json.Unmarshal(msg.Data, &offer)
 	if err != nil {
 		panic(err)
 	}
@@ -166,26 +153,21 @@ func (p *Peer) handleOffer(pkt packet) {
 		panic(err)
 	}
 	p.connection.SetLocalDescription(answer)
-
-	jsonAnswer, err := json.Marshal(answer)
-	if err != nil {
-		panic(err)
-	}
-	p.packetChannel <- packet{PacketType: ANSWER_PACKET, Data: jsonAnswer}
+	p.packetQueue <- NewMessage(ANSWER_PACKET, answer)
 }
 
-func (p *Peer) handleAnswer(pkt packet) {
+func (p *Peer) handleAnswer(msg Message) {
 	var answer webrtc.SessionDescription
-	err := json.Unmarshal(pkt.Data, &answer)
+	err := json.Unmarshal(msg.Data, &answer)
 	if err != nil {
 		panic(err)
 	}
 	p.connection.SetRemoteDescription(answer)
 }
 
-func (p *Peer) handleICECandidate(pkt packet) {
+func (p *Peer) handleICECandidate(msg Message) {
 	var candidate webrtc.ICECandidate
-	err := json.Unmarshal(pkt.Data, &candidate)
+	err := json.Unmarshal(msg.Data, &candidate)
 	if err != nil {
 		panic(err)
 	}
@@ -211,12 +193,8 @@ func (p *Peer) RunClientAndServer(devicePort int) {
 	// write to our own port
 	go func() {
 		broadcastAddr := &net.UDPAddr{Port: devicePort, IP: net.IPv4bcast}
-		for pkt := range p.packetChannel {
-			jsonPacket, err := json.Marshal(pkt)
-			if err != nil {
-				panic(err)
-			}
-			p.udpConnection.WriteToUDP(jsonPacket, broadcastAddr)
+		for pkt := range p.packetQueue {
+			p.udpConnection.WriteToUDP(pkt.Serialize(), broadcastAddr)
 		}
 	}()
 
@@ -229,18 +207,18 @@ func (p *Peer) RunClientAndServer(devicePort int) {
 				panic(err)
 			}
 
-			var pkt packet
-			err = json.Unmarshal(buffer[0:length], &pkt)
+			var msg Message
+			err = json.Unmarshal(buffer[0:length], &msg)
 			if err != nil {
 				panic(err)
 			}
-			switch pkt.PacketType {
+			switch msg.MessageType {
 			case OFFER_PACKET:
-				p.handleOffer(pkt)
+				p.handleOffer(msg)
 			case ANSWER_PACKET:
-				p.handleAnswer(pkt)
+				p.handleAnswer(msg)
 			case ICE_PACKET:
-				p.handleICECandidate(pkt)
+				p.handleICECandidate(msg)
 			default:
 				panic("uknown signal type")
 			}

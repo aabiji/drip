@@ -46,7 +46,7 @@ func (a *App) startup(ctx context.Context) {
 func (a *App) GetPeers() []string {
 	names := []string{}
 	for name := range a.finder.Peers {
-		if a.finder.Peers[name].Connected {
+		if a.finder.Peers[name].Connected() {
 			names = append(names, name)
 		}
 	}
@@ -56,7 +56,7 @@ func (a *App) GetPeers() []string {
 func (a *App) StartFileTransfer(info p2p.FileInfo) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_START, info)
 	for _, peerId := range info.Recipients {
-		a.syncer.PendingMessages[peerId] <- msg
+		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
 	}
 	return true
 }
@@ -64,7 +64,7 @@ func (a *App) StartFileTransfer(info p2p.FileInfo) bool {
 func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
 	for _, peerId := range chunk.Recipients {
-		a.syncer.PendingMessages[peerId] <- msg
+		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
 	}
 	return true
 }

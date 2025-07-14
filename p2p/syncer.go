@@ -1,19 +1,28 @@
 package p2p
 
-// file transfer coordinator
-type FileSyncer struct {
-	// pending messages to be sent through the peer's data channel
-	PendingMessages map[string]chan Message
+// file transfer message types
+type FileInfo struct {
+	Recipients []string `json:"recipients"`
+	FileName   string   `json:"name"`
+	FileSize   int64    `json:"size"`
+	NumChunks  int      `json:"numChunks"`
 }
+
+type FileChunk struct {
+	Data       []uint8  `json:"data"`
+	Index      int      `json:"chunkIndex"`
+	Recipients []string `json:"recipients"`
+}
+
+type Reply struct {
+	ChunksReceived []bool `json:"received"`
+}
+
+// file transfer coordinator
+type FileSyncer struct{}
 
 func NewFileSyncer() FileSyncer {
-	return FileSyncer{
-		PendingMessages: make(map[string]chan Message),
-	}
-}
-
-func (f *FileSyncer) AddPeer(id string) {
-	f.PendingMessages[id] = make(chan Message, 100)
+	return FileSyncer{}
 }
 
 func (f *FileSyncer) HandleMessage(msg Message) Message {

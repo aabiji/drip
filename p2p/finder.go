@@ -68,20 +68,11 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 
 	_, exists := f.Peers[peerId]
 	if exists {
-		f.Peers[peerId].lastHeardFrom = time.Now()
+		f.Peers[peerId].LastHeardFrom = time.Now()
 	} else {
-		peer := &Peer{
-			Ip:            entry.AddrV4,
-			Id:            peerId,
-			polite:        polite,
-			udpPort:       entry.Port,
-			lastHeardFrom: time.Now(),
-			syncer:        f.syncer,
-		}
-		f.syncer.AddPeer(peerId)
+		peer := NewPeer(entry.AddrV4, peerId, polite, f.syncer, entry.Port, f.devicePort)
 		peer.CreateConnection()
-		peer.SetupDataChannel()
-		peer.RunClientAndServer(f.devicePort)
+		peer.SetupDataChannels()
 		f.Peers[peerId] = peer
 	}
 
@@ -111,7 +102,7 @@ func (f *PeerFinder) listenForBroadcasts(eventChannel chan string, ctx context.C
 		// Remove peers we haven't heard from in a while
 		f.mutex.Lock()
 		for key, value := range f.Peers {
-			if time.Since(value.lastHeardFrom) >= f.peerRemovalTimeout {
+			if time.Since(value.LastHeardFrom) >= f.peerRemovalTimeout {
 				delete(f.Peers, key)
 			}
 		}

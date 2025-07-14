@@ -3,8 +3,6 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"io"
-	"log"
 	"net"
 	"strings"
 	"sync"
@@ -17,9 +15,8 @@ type PeerFinder struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
-	transferService *TransferService
+	syncer *FileSyncer
 
-	deviceId    string
 	devicePort  int
 	serviceType string
 
@@ -28,36 +25,23 @@ type PeerFinder struct {
 	server             *mdns.Server
 }
 
-func NewPeerFinder(debugMode bool, t *TransferService) PeerFinder {
+func NewPeerFinder(debugMode bool, t *FileSyncer) PeerFinder {
 	return PeerFinder{
-		deviceId:           getDeviceName(debugMode),
 		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
 		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
-		transferService:    t,
+		syncer:             t,
 	}
-}
-
-func (f *PeerFinder) ConnectToPeer(id string) bool {
-	peer, ok := f.Peers[id]
-	if !ok {
-		return false // Not aware of the peer -- TODO: how to handle?
-	}
-	if peer.ConnectionState == DISCONNECTED {
-		peer.CreateConnection()
-		peer.RunClientAndServer(f.devicePort)
-		peer.SetupDataChannel()
-	}
-	return true
 }
 
 func (f *PeerFinder) broadcastOurService() error {
-	hostname := fmt.Sprintf("%s.local.", f.deviceId)
+	id := getDeviceName()
+	hostname := fmt.Sprintf("%s.local.", id)
 
 	service, err := mdns.NewMDNSService(
-		f.deviceId, f.serviceType, "local.", hostname,
+		id, f.serviceType, "local.", hostname,
 		f.devicePort, []net.IP{getDeviceIP()}, []string{})
 	if err != nil {
 		return err
@@ -69,7 +53,7 @@ func (f *PeerFinder) broadcastOurService() error {
 
 func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
-	if peerId == f.deviceId {
+	if peerId == getDeviceName() {
 		return // ignore ourselves
 	}
 
@@ -78,7 +62,7 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	// Being impolite will mean we ignore the peer's offer and continue with
 	// our own. This way, we avoid collisions by knowing that only one peer
 	// is able to initiate a connection
-	polite := peerId < f.deviceId
+	polite := peerId < getDeviceName()
 
 	f.mutex.Lock()
 
@@ -87,15 +71,18 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 		f.Peers[peerId].lastHeardFrom = time.Now()
 	} else {
 		peer := &Peer{
-			Ip:              entry.AddrV4,
-			Id:              peerId,
-			polite:          polite,
-			udpPort:         entry.Port,
-			lastHeardFrom:   time.Now(),
-			transferService: f.transferService,
+			Ip:            entry.AddrV4,
+			Id:            peerId,
+			polite:        polite,
+			udpPort:       entry.Port,
+			lastHeardFrom: time.Now(),
+			syncer:        f.syncer,
 		}
+		f.syncer.AddPeer(peerId)
+		peer.CreateConnection()
+		peer.SetupDataChannel()
+		peer.RunClientAndServer(f.devicePort)
 		f.Peers[peerId] = peer
-		f.transferService.AddPeer(peerId)
 	}
 
 	f.mutex.Unlock()
@@ -112,18 +99,14 @@ func (f *PeerFinder) listenForBroadcasts(eventChannel chan string, ctx context.C
 		}
 	}()
 
-	original := log.Writer()
-
 	for {
 		params := mdns.DefaultParams(f.serviceType)
 		params.Entries = entriesChannel
 		params.Timeout = f.queryFrequency
 
-		log.SetOutput(io.Discard) // disable the logging mdns does
 		if err := mdns.Query(params); err != nil {
 			return err
 		}
-		log.SetOutput(original)
 
 		// Remove peers we haven't heard from in a while
 		f.mutex.Lock()

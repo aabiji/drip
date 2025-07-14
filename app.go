@@ -8,20 +8,20 @@ import (
 )
 
 type App struct {
-	ctx context.Context
+	ctx    context.Context
+	events chan string
 
-	events          chan string
-	transferService p2p.TransferService
-	finder          p2p.PeerFinder
+	syncer p2p.FileSyncer
+	finder p2p.PeerFinder
 }
 
 func NewApp() *App {
-	t := p2p.NewTransferService()
+	syncer := p2p.NewFileSyncer()
 
 	return &App{
-		events:          make(chan string, 10),
-		transferService: t,
-		finder:          p2p.NewPeerFinder(true, &t),
+		events: make(chan string, 10),
+		syncer: syncer,
+		finder: p2p.NewPeerFinder(true, &syncer),
 	}
 }
 
@@ -45,30 +45,26 @@ func (a *App) startup(ctx context.Context) {
 
 func (a *App) GetPeers() []string {
 	names := []string{}
-	for name, _ := range a.finder.Peers {
-		names = append(names, name)
+	for name := range a.finder.Peers {
+		if a.finder.Peers[name].Connected {
+			names = append(names, name)
+		}
 	}
 	return names
 }
 
-func (a *App) StartFileTransfer(info p2p.TransferInfo) {
+func (a *App) StartFileTransfer(info p2p.FileInfo) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_START, info)
-
 	for _, peerId := range info.Recipients {
-		exists := a.finder.ConnectToPeer(peerId)
-		if exists {
-			a.transferService.Pending[peerId] <- msg
-		}
+		a.syncer.PendingMessages[peerId] <- msg
 	}
+	return true
 }
 
-func (a *App) SendFileChunk(chunk p2p.FileChunk) {
+func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
-
 	for _, peerId := range chunk.Recipients {
-		exists := a.finder.ConnectToPeer(peerId)
-		if exists {
-			a.transferService.Pending[peerId] <- msg
-		}
+		a.syncer.PendingMessages[peerId] <- msg
 	}
+	return true
 }

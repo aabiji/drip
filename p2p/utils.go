@@ -7,6 +7,8 @@ import (
 	"os"
 )
 
+const DEBUG_MODE bool = true
+
 func getDeviceIP() net.IP {
 	// get the prefered outbound ip address of this device
 	conn, err := net.Dial("udp", "8.8.8.8:80")
@@ -19,16 +21,24 @@ func getDeviceIP() net.IP {
 	return localAddr.IP
 }
 
-func getDeviceName(debugMode bool) string {
-	if debugMode {
+var cached_device_name string = ""
+
+func getDeviceName() string {
+	if len(cached_device_name) > 0 {
+		return cached_device_name
+	}
+
+	if DEBUG_MODE {
 		id := rand.Intn(1000000)
-		return fmt.Sprintf("peer-%d", id)
+		cached_device_name = fmt.Sprintf("peer-%d", id)
+		return cached_device_name
 	}
 
 	name, err := os.Hostname()
 	if err != nil {
 		panic(err) // getting the hostname is a must
 	}
+	cached_device_name = name
 	return name
 }
 

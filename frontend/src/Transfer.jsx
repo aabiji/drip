@@ -139,66 +139,17 @@ function ErrorMessage({ message, onRetry }) {
   );
 }
 
-/*
-Ok, send file transfer start to backend:
-- there's this FileTransfers service that holds all the peers
-- it holds a cache of all the transfer info,
-  creates a new transferId for each file transfer
-  backend should send that transferId in its acknoledgement response
-  ** no, the frontend creates the transferId and stores it in the header
-
-type FileTransferInfo struct {
-  name           string
-  size           int64
-  numChunks      int
-  chunksReceived [numChunks]bool // chunks can come out of order
-
-  tempFilePath   string
-}
-
-Map transferId to FileTransferInfo? Or just store it in a list.
-Both the send and receiver should save this metadata to disk.
-That way, any transfer goes as long as
-we have a corresponding FileTransferInfo since we'd know how to handle it
-Read from disk every time we open the app. Should share the info with the frontend
-
-So when the backend gets a chunk, it should have a transferId to go along
-with it, so the backend can update chunksReceived, and write the chunk.
-Then send an acknoledgement response. On the sender's side, if we don't get
-an acknoledgement in N seconds we know they probably didn't get it, and we
-resend the chunk (like tcp's retransmission logic).
-
-To write the output file on the recipient's device, we just create a new
-file of a certain size (fallocate syscall), mmap and write the chunk.
-The file gets closed if we've received all the chunks or the peer disconnects
-or there's some other error. Each file should also get protected by a mutex,
-to avoid race conditions.
-
-We could checksum each hash to ensure its integrity (also pass along a checksum with the chunk,
-and our checksum of the received chunk doesn't match its intended checksum we reject it
-and pretend it was never sent).
-
-```!
-Each peer connection struct holds
-
-fileTransferProgres map[string][]bool // maps the transfer id to a list of booleans
-
-in the list of boolean, each index corresponds to whether we've received that chunk or not
-
-and so the receiving peer sends that after receiving a chunk
-```
-
-Edge cases:
-- what if a peer joins late?
-*/
-
 export default function TransferPane({ state }) {
   const streamFile = async (file) => {
     const chunkSize = 5 * 1024 * 1024; // 5 megabytes
     const numChunks = Math.ceil(file.size / chunkSize);
-    const info = { recipients: state.selectedPeers, name: file.name, size: file.size, numChunks };
+    const info = {
+      recipients: state.selectedPeers,
+      name: file.name, size: file.size,
+      numChunks
+    };
 
-    const ok = StartFileTransfer(info);
+    const ok = await StartFileTransfer(info);
     if (!ok) {
       console.log("tell the user the error!");
       return;
@@ -207,7 +158,11 @@ export default function TransferPane({ state }) {
     for (let i = 0; i < numChunks; i++) {
       const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
       const chunkData = new Uint8Array(await slice.arrayBuffer());
-      const chunk = { data: Array.from(chunkData), chunkIndex: i };
+      const chunk = {
+        data: Array.from(chunkData),
+        chunkIndex: i,
+        recipients: state.selectedPeers
+      };
       const ok = await SendFileChunk(chunk);
       if (!ok) {
         console.log("tell the user the error!"); // TODO: stop!
@@ -230,29 +185,31 @@ export default function TransferPane({ state }) {
     }
   };
 
-  const startSending = async () => {
-    state.setSending(true);
-    await sendFiles();
-  };
 
-  const stopSending = () => {
-    state.setPercentages([]);
-    state.setSending(false);
-    // TODO: stop file transfers
-  };
+  useEffect(() => {
+    const startSending = async () => await sendFiles();
+
+    if (state.sending)
+       startSending();
+    else {
+      state.setPercentages([]);
+      state.setSending(false);
+      // TODO: stop file transfers
+    }
+  }, [state.sending]);
 
   return (
     <div className="inner-content">
       {!state.sending && <FileAndPeerSelection state={state} />}
       {state.sending &&
-        <div class="inner-content">
-          <div class="status-top-row">
-            <button onClick={() => stopSending()}> Cancel </button>
+        <div className="inner-content">
+          <div className="status-top-row">
+            <button onClick={() => state.setSending(false)}> Cancel </button>
             <h1> Sending </h1>
           </div>
           <div className="progress-container">
             {state.percentages.map((p, index) =>
-              <FileEntry name={state.selectedFiles[index].name} progress={p} />
+              <FileEntry key={index} name={state.selectedFiles[index].name} progress={p} />
             )}
           </div>
           <div className="error-tray">{/* TODO: error messages go here */}</div>

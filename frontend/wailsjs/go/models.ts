@@ -3,6 +3,7 @@ export namespace p2p {
 	export class FileChunk {
 	    data: number[];
 	    chunkIndex: number;
+	    recipients: string[];
 	
 	    static createFrom(source: any = {}) {
 	        return new FileChunk(source);
@@ -12,16 +13,17 @@ export namespace p2p {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.data = source["data"];
 	        this.chunkIndex = source["chunkIndex"];
+	        this.recipients = source["recipients"];
 	    }
 	}
-	export class TransferInfo {
+	export class FileInfo {
 	    recipients: string[];
 	    name: string;
 	    size: number;
 	    numChunks: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new TransferInfo(source);
+	        return new FileInfo(source);
 	    }
 	
 	    constructor(source: any = {}) {

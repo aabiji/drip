@@ -1,31 +1,17 @@
 package p2p
 
 import (
-	"encoding/json"
-	"fmt"
+	"log"
 	"net"
 	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
-const ( // connection states
-	DISCONNECTED = 0
-	CONNECTED    = 1
-	CONNECTING   = 2
-)
-
-const ( // packet types
-	OFFER_PACKET  = 0
-	ANSWER_PACKET = 1
-	ICE_PACKET    = 2
-)
-
-// TODO: this is doing way too much stuff...refactor
 type Peer struct {
-	Ip              net.IP
-	Id              string
-	ConnectionState int
+	Ip        net.IP
+	Id        string
+	Connected bool
 
 	lastHeardFrom time.Time
 
@@ -38,7 +24,7 @@ type Peer struct {
 	udpPort       int
 	udpConnection *net.UDPConn
 
-	transferService *TransferService
+	syncer *FileSyncer
 }
 
 func (p *Peer) Close() {
@@ -48,7 +34,9 @@ func (p *Peer) Close() {
 
 func (p *Peer) CreateConnection() {
 	var err error
-	config := webrtc.Configuration{ICEServers: []webrtc.ICEServer{}}
+	config := webrtc.Configuration{
+		ICEServers: []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}},
+	}
 	p.connection, err = webrtc.NewPeerConnection(config)
 	if err != nil {
 		panic(err)
@@ -57,17 +45,15 @@ func (p *Peer) CreateConnection() {
 
 	p.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		switch state {
-		case webrtc.PeerConnectionStateConnecting:
-			p.ConnectionState = CONNECTING
 		case webrtc.PeerConnectionStateConnected:
-			p.ConnectionState = CONNECTED
+			p.Connected = true
+		case webrtc.PeerConnectionStateDisconnected,
+			webrtc.PeerConnectionStateFailed,
+			webrtc.PeerConnectionStateClosed:
+			p.Connected = false
+			p.handlePeerDisconnect()
 		default:
-			p.ConnectionState = DISCONNECTED
-		}
-
-		if p.ConnectionState == DISCONNECTED {
-			// TODO
-			fmt.Println("handling peer disconnect...")
+			// do nothing
 		}
 	})
 
@@ -79,56 +65,71 @@ func (p *Peer) CreateConnection() {
 		if err != nil {
 			panic(err)
 		}
-		p.connection.SetLocalDescription(offer)
+		if err := p.connection.SetLocalDescription(offer); err != nil {
+			panic(err)
+		}
 
 		p.packetQueue <- NewMessage(OFFER_PACKET, offer)
+
 		p.makingOffer = false
+
+		log.Println("Sending an offer")
 	})
 
 	p.connection.OnICECandidate(func(i *webrtc.ICECandidate) {
 		p.packetQueue <- NewMessage(ICE_PACKET, i)
+		log.Println("Sending an ice candidate")
 	})
-}
-
-func (p *Peer) dataChannelSender() {
-	// send pending messages over the data channel
-	for msg := range p.transferService.Pending[p.Id] {
-		p.dataChannel.Send(msg.Serialize())
-	}
-}
-
-func (p *Peer) dataChannelReceiver(channelMsg webrtc.DataChannelMessage) {
-	msg := Message{}
-	err := json.Unmarshal(channelMsg.Data, &msg)
-	if err != nil {
-		panic(err)
-	}
-	response := p.transferService.HandleMessage(msg)
-	p.dataChannel.Send(response.Serialize())
-}
-
-func (p *Peer) dataChannelClose() {
-	fmt.Println("data channel closed...handle cleanup")
 }
 
 func (p *Peer) SetupDataChannel() {
 	if p.polite { // on the responder's end of the connection
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+			log.Println("Accepting a data channel")
+
 			p.dataChannel = dataChannel
 			p.dataChannel.OnOpen(p.dataChannelSender)
 			p.dataChannel.OnMessage(p.dataChannelReceiver)
-			p.dataChannel.OnClose(p.dataChannelClose)
+			p.dataChannel.OnClose(p.handlePeerDisconnect)
 		})
 	} else { // on the initiator's end of the connection
 		var err error
+		log.Println("Creating a data channel")
 		p.dataChannel, err = p.connection.CreateDataChannel("data", nil)
 		if err != nil {
 			panic(err)
 		}
+
 		p.dataChannel.OnOpen(p.dataChannelSender)
 		p.dataChannel.OnMessage(p.dataChannelReceiver)
-		p.dataChannel.OnClose(p.dataChannelClose)
+		p.dataChannel.OnClose(p.handlePeerDisconnect)
 	}
+}
+
+func (p *Peer) dataChannelSender() {
+	// send pending messages over the data channel
+	p.Connected = true
+	for msg := range p.syncer.PendingMessages[p.Id] {
+		log.Printf("Sending: %v\n", msg)
+		p.dataChannel.Send(msg.Serialize())
+	}
+}
+
+func (p *Peer) dataChannelReceiver(channelMsg webrtc.DataChannelMessage) {
+	msg := Deserialize(channelMsg.Data)
+	if msg.SenderId == getDeviceName() {
+		return // ignore our own messages
+	}
+	log.Printf("Receiving: %v\n", msg)
+
+	response := p.syncer.HandleMessage(msg)
+	p.dataChannel.Send(response.Serialize())
+}
+
+func (p *Peer) handlePeerDisconnect() {
+	log.Println("Peer disconnected")
+	// TODO! --> peer disconnected or the data channel closed
+	p.Connected = false
 }
 
 func (p *Peer) handleOffer(msg Message) {
@@ -141,39 +142,49 @@ func (p *Peer) handleOffer(msg Message) {
 	}
 	p.makingOffer = false
 
-	var offer webrtc.SessionDescription
-	err := json.Unmarshal(msg.Data, &offer)
+	offer, err := DeserializeInto[webrtc.SessionDescription](msg)
 	if err != nil {
 		panic(err)
 	}
-	p.connection.SetRemoteDescription(offer)
+	if err := p.connection.SetRemoteDescription(offer); err != nil {
+		panic(err)
+	}
 
 	answer, err := p.connection.CreateAnswer(nil)
 	if err != nil {
 		panic(err)
 	}
-	p.connection.SetLocalDescription(answer)
+
+	if err := p.connection.SetLocalDescription(answer); err != nil {
+		panic(err)
+	}
 	p.packetQueue <- NewMessage(ANSWER_PACKET, answer)
+	log.Println("Accepting an offer")
 }
 
 func (p *Peer) handleAnswer(msg Message) {
-	var answer webrtc.SessionDescription
-	err := json.Unmarshal(msg.Data, &answer)
+	answer, err := DeserializeInto[webrtc.SessionDescription](msg)
 	if err != nil {
 		panic(err)
 	}
-	p.connection.SetRemoteDescription(answer)
+	if p.connection.SetRemoteDescription(answer); err != nil {
+		panic(err)
+	}
+	log.Println("Accepting an answer")
 }
 
 func (p *Peer) handleICECandidate(msg Message) {
-	var candidate webrtc.ICECandidate
-	err := json.Unmarshal(msg.Data, &candidate)
+	candidate, err := DeserializeInto[webrtc.ICECandidate](msg)
 	if err != nil {
 		panic(err)
 	}
 	p.connection.AddICECandidate(candidate.ToJSON())
+	log.Println("Adding an ICE candidate")
 }
 
+// FIXME: I know what's happening...we're trying to connect but when we send out our
+// udp packets, the peer might not be up, and might miss the packet
+// Should we use tcp?? How should we fix/
 func (p *Peer) RunClientAndServer(devicePort int) {
 	bufferSize := 65536
 
@@ -207,11 +218,7 @@ func (p *Peer) RunClientAndServer(devicePort int) {
 				panic(err)
 			}
 
-			var msg Message
-			err = json.Unmarshal(buffer[0:length], &msg)
-			if err != nil {
-				panic(err)
-			}
+			msg := Deserialize(buffer[0:length])
 			switch msg.MessageType {
 			case OFFER_PACKET:
 				p.handleOffer(msg)

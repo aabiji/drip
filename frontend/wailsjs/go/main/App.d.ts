@@ -6,4 +6,4 @@ export function GetPeers():Promise<Array<string>>;
 
 export function SendFileChunk(arg1:p2p.FileChunk):Promise<boolean>;
 
-export function StartFileTransfer(arg1:p2p.FileInfo):Promise<boolean>;
+export function StartFileTransfer(arg1:p2p.Transfer):Promise<boolean>;

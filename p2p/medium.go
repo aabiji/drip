@@ -1,6 +1,7 @@
 package p2p
 
 import (
+	"context"
 	"encoding/binary"
 	"encoding/json"
 	"io"
@@ -65,6 +66,13 @@ func DeserializeInto[T any](msg Message) (T, error) {
 	return result, err
 }
 
+type Medium interface {
+	QueueMessage(msg Message)
+	ForwardMessages(ctx context.Context)
+	ReceiveMessages(ctx context.Context, handler func(msg Message))
+	Connected() bool
+}
+
 type TCPMedium struct {
 	packets  chan Message
 	peerAddr string
@@ -73,9 +81,7 @@ type TCPMedium struct {
 
 func (t *TCPMedium) QueueMessage(msg Message) { t.packets <- msg }
 
-func (t *TCPMedium) Close() {
-	// TODO!
-}
+func (t *TCPMedium) Connected() bool { return false } // placeholder function
 
 func sendTCPMessage(conn net.Conn, msg Message) error {
 	data := msg.Serialize()
@@ -104,30 +110,46 @@ func readFramedMessage(conn net.Conn) ([]byte, error) {
 	return body, nil
 }
 
-func (t *TCPMedium) ForwardMessages() {
+func (t *TCPMedium) ForwardMessages(ctx context.Context) {
 	var conn net.Conn
 	var err error
 
 	// keep trying to connect to peer until succesful
+dialoop:
 	for {
-		conn, err = net.Dial("tcp", t.peerAddr)
-		if err == nil {
-			break
+		select {
+		case <-ctx.Done():
+			close(t.packets)
+			return // quit
+		default:
+			conn, err = net.Dial("tcp", t.peerAddr)
+			if err == nil {
+				break dialoop
+			}
+			time.Sleep(2 * time.Second)
+			log.Println("Retrying peer TCP connection")
 		}
-		time.Sleep(2 * time.Second)
-		log.Println("Retrying peer TCP connection")
 	}
 	defer conn.Close()
 
-	for pkt := range t.packets {
-		err := sendTCPMessage(conn, pkt)
-		if err != nil {
-			panic(err)
+	for {
+		select {
+		case <-ctx.Done():
+			close(t.packets)
+			return // quit
+		case pkt, ok := <-t.packets:
+			if !ok {
+				return
+			}
+			err := sendTCPMessage(conn, pkt)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 }
 
-func (t *TCPMedium) ReceiveMessages(handler func(msg Message)) {
+func (t *TCPMedium) ReceiveMessages(ctx context.Context, handler func(msg Message)) {
 	listener, err := net.Listen("tcp", t.ourAddr)
 	if err != nil {
 		panic(err)
@@ -143,12 +165,18 @@ func (t *TCPMedium) ReceiveMessages(handler func(msg Message)) {
 		go func(c net.Conn) {
 			defer c.Close()
 			for {
-				data, err := readFramedMessage(conn)
-				if err != nil {
-					panic(err)
+				select {
+				case <-ctx.Done():
+					close(t.packets)
+					return // quit
+				default:
+					data, err := readFramedMessage(conn)
+					if err != nil {
+						panic(err)
+					}
+					msg := Deserialize(data)
+					handler(msg)
 				}
-				msg := Deserialize(data)
-				handler(msg)
 			}
 		}(conn)
 	}
@@ -160,39 +188,53 @@ type WebRTCMedium struct {
 	connected   bool
 }
 
-func NewWebRTCMedium(channel *webrtc.DataChannel) WebRTCMedium {
-	m := WebRTCMedium{
+func (w *WebRTCMedium) Connected() bool { return w.connected }
+
+func NewWebRTCMedium(channel *webrtc.DataChannel) *WebRTCMedium {
+	m := &WebRTCMedium{
 		pending:     make(chan Message, 100),
 		dataChannel: channel,
 		connected:   false,
 	}
-	m.dataChannel.OnClose(m.Close) // TODO: allow the user to pass in a close handler
+	m.dataChannel.OnClose(func() {
+		close(m.pending)
+		m.connected = false
+	})
 	return m
 }
 
 func (w *WebRTCMedium) QueueMessage(msg Message) { w.pending <- msg }
 
-func (w *WebRTCMedium) ForwardMessages() {
+func (w *WebRTCMedium) ForwardMessages(ctx context.Context) {
 	w.dataChannel.OnOpen(func() {
 		w.connected = true
-		for msg := range w.pending {
-			log.Printf("Sending: %v\n", msg)
-			w.dataChannel.Send(msg.Serialize())
+		for {
+			select {
+			case <-ctx.Done():
+				w.dataChannel.GracefulClose()
+				return
+			case msg, ok := <-w.pending:
+				if !ok {
+					return
+				}
+				w.dataChannel.Send(msg.Serialize())
+			}
 		}
 	})
 }
 
-func (w *WebRTCMedium) ReceiveMessages(handler func(msg Message)) {
+func (w *WebRTCMedium) ReceiveMessages(ctx context.Context, handler func(msg Message)) {
 	w.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
-		msg := Deserialize(channelMsg.Data)
-		if msg.SenderId == getDeviceName() {
-			return // ignore our own messages
+		select {
+		case <-ctx.Done():
+			w.dataChannel.GracefulClose()
+			return
+		default:
+			msg := Deserialize(channelMsg.Data)
+			if msg.SenderId == getDeviceName() {
+				return // ignore our own messages
+			}
+			handler(msg)
 		}
-		log.Printf("Receiving: %v\n", msg)
 	})
-}
-
-func (w *WebRTCMedium) Close() {
-	w.connected = false
-	w.dataChannel.GracefulClose()
 }

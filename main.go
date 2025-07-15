@@ -20,6 +20,7 @@ func main() {
 		Height:      700,
 		AssetServer: &assetserver.Options{Assets: assets},
 		OnStartup:   app.startup,
+		OnShutdown:  app.shutdown,
 		Bind:        []any{app},
 	})
 

@@ -51,7 +51,7 @@ func (f *PeerFinder) broadcastOurService() error {
 	return err
 }
 
-func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
+func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
 	if peerId == getDeviceName() {
 		return // ignore ourselves
@@ -72,7 +72,7 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	} else {
 		peer := NewPeer(entry.AddrV4, peerId, polite, f.syncer, entry.Port, f.devicePort)
 		peer.CreateConnection()
-		peer.SetupDataChannels()
+		peer.SetupDataChannels(ctx)
 		f.Peers[peerId] = peer
 	}
 
@@ -80,12 +80,14 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 }
 
 // Listen for broadcasts from other devices every 10 seconds
-func (f *PeerFinder) listenForBroadcasts(eventChannel chan string, ctx context.Context) error {
+func (f *PeerFinder) listenForBroadcasts(ctx context.Context, eventChannel chan string) error {
 	// Start lisening to the broadcasts of other devices
 	entriesChannel := make(chan *mdns.ServiceEntry, 25)
+	defer close(entriesChannel)
+
 	go func() {
 		for entry := range entriesChannel {
-			f.addPeer(entry)
+			f.addPeer(ctx, entry)
 			eventChannel <- "peers-updated"
 		}
 	}()
@@ -123,7 +125,7 @@ func (f *PeerFinder) Run(eventChannel chan string, ctx context.Context) error {
 		return err
 	}
 
-	if err := f.listenForBroadcasts(eventChannel, ctx); err != nil {
+	if err := f.listenForBroadcasts(ctx, eventChannel); err != nil {
 		return err
 	}
 

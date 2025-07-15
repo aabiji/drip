@@ -1,12 +1,12 @@
 package p2p
 
 import (
+	"context"
 	"fmt"
+	"github.com/pion/webrtc/v4"
 	"log"
 	"net"
 	"time"
-
-	"github.com/pion/webrtc/v4"
 )
 
 type Peer struct {
@@ -17,8 +17,8 @@ type Peer struct {
 	connected   bool
 	polite      bool
 
-	Webrtc    WebRTCMedium
-	tcpMedium TCPMedium
+	Webrtc    Medium
+	tcpMedium Medium
 
 	connection *webrtc.PeerConnection
 	syncer     *FileSyncer
@@ -34,18 +34,13 @@ func NewPeer(ip net.IP, id string, polite bool, syncer *FileSyncer, port, device
 		polite:        polite,
 		LastHeardFrom: time.Now(),
 		syncer:        syncer,
-		tcpMedium:     TCPMedium{packets, peerAddr, ourAddr},
+		tcpMedium:     &TCPMedium{packets, peerAddr, ourAddr},
 	}
 }
 
-func (p *Peer) Close() {
-	p.Webrtc.Close()
-	p.tcpMedium.Close()
-}
+func (p *Peer) Close() { p.connection.Close() }
 
-func (p *Peer) Connected() bool {
-	return p.Webrtc.connected || p.connected
-}
+func (p *Peer) Connected() bool { return p.Webrtc.Connected() || p.connected }
 
 func (p *Peer) CreateConnection() {
 	var err error
@@ -94,18 +89,23 @@ func (p *Peer) CreateConnection() {
 	})
 }
 
-func (p *Peer) SetupDataChannels() {
+func (p *Peer) SetupDataChannels(ctx context.Context) {
 	handler := func(msg Message) {
 		response := p.syncer.HandleMessage(msg)
-		p.Webrtc.QueueMessage(response)
+		if response != nil {
+			p.Webrtc.QueueMessage(*response)
+		}
 	}
+
+	go func() { p.tcpMedium.ForwardMessages(ctx) }()
+	go func() { p.tcpMedium.ReceiveMessages(ctx, p.handlePeerMessage) }()
 
 	if p.polite {
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 			log.Println("Accepting a data channel -- responder")
 			p.Webrtc = NewWebRTCMedium(dataChannel)
-			p.Webrtc.ForwardMessages()
-			p.Webrtc.ReceiveMessages(handler)
+			p.Webrtc.ForwardMessages(ctx)
+			p.Webrtc.ReceiveMessages(ctx, handler)
 		})
 	} else {
 		log.Println("Creating a data channel -- initiator")
@@ -114,12 +114,9 @@ func (p *Peer) SetupDataChannels() {
 			panic(err)
 		}
 		p.Webrtc = NewWebRTCMedium(dataChannel)
-		p.Webrtc.ForwardMessages()
-		p.Webrtc.ReceiveMessages(handler)
+		p.Webrtc.ForwardMessages(ctx)
+		p.Webrtc.ReceiveMessages(ctx, handler)
 	}
-
-	go func() { p.tcpMedium.ForwardMessages() }()
-	go func() { p.tcpMedium.ReceiveMessages(p.handlePeerMessage) }()
 }
 
 func (p *Peer) handlePeerDisconnect() {

@@ -2,9 +2,10 @@ package main
 
 import (
 	"context"
-
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"os"
+	"path"
 )
 
 type App struct {
@@ -16,7 +17,13 @@ type App struct {
 }
 
 func NewApp() *App {
-	syncer := p2p.NewFileSyncer()
+	// TODO: read from settings json file
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+	fullpath := path.Join(home, "Downloads")
+	syncer := p2p.NewFileSyncer(fullpath)
 
 	return &App{
 		events: make(chan string, 10),
@@ -43,6 +50,14 @@ func (a *App) startup(ctx context.Context) {
 	}()
 }
 
+func (a *App) shutdown(ctx context.Context) {
+	a.syncer.Close()
+	for _, peer := range a.finder.Peers {
+		peer.Close()
+	}
+	close(a.events)
+}
+
 func (a *App) GetPeers() []string {
 	names := []string{}
 	for name := range a.finder.Peers {
@@ -53,17 +68,23 @@ func (a *App) GetPeers() []string {
 	return names
 }
 
-func (a *App) StartFileTransfer(info p2p.FileInfo) bool {
+func (a *App) StartFileTransfer(info p2p.Transfer) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_START, info)
 	for _, peerId := range info.Recipients {
 		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
+		a.syncer.SenderMarkTransfer(info)
 	}
 	return true
 }
 
 func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
+	recipients, err := a.syncer.TransferRecipients(chunk.TransferId)
+	if err != nil {
+		panic(err) // TODO: tell the user
+	}
+
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
-	for _, peerId := range chunk.Recipients {
+	for _, peerId := range recipients {
 		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
 	}
 	return true

@@ -18,10 +18,10 @@ function FileEntry({ name, progress, onClick }) {
   }, []);
 
   return (
-    <div className={!full ? "file-entry": "file-entry full"}>
+    <div className={!full ? "file-entry" : "file-entry full"}>
       <div className="inner">
         <p>{name}</p>
-        {onClick !== undefined  && <button onClick={onClick}>x</button>}
+        {onClick !== undefined && <button onClick={onClick}>x</button>}
       </div>
       {progress !== undefined && <div className="progress-bar" ref={barElement}></div>}
     </div>
@@ -62,8 +62,8 @@ function FileAndPeerSelection({ state }) {
     let files = [];
     if (event.dataTransfer.items) {
       files = Array.from(event.dataTransfer.items)
-                .filter((item) => item.kind === "file")
-                .map((item) => item.getAsFile());
+        .filter((item) => item.kind === "file")
+        .map((item) => item.getAsFile());
     } else {
       files = event.dataTransfer.files;
     }
@@ -130,11 +130,11 @@ function ErrorMessage({ message, onRetry }) {
   return (
     <div className="error-message">
       <p>{message}</p>
-        {onRetry !== undefined &&
-          <button className="retry-button">
-            <RetryIcon className="retry-icon" />
-          </button>
-        }
+      {onRetry !== undefined &&
+        <button className="retry-button">
+          <RetryIcon className="retry-icon" />
+        </button>
+      }
     </div>
   );
 }
@@ -143,10 +143,13 @@ export default function TransferPane({ state }) {
   const streamFile = async (file) => {
     const chunkSize = 5 * 1024 * 1024; // 5 megabytes
     const numChunks = Math.ceil(file.size / chunkSize);
-    const info = {
-      recipients: state.selectedPeers,
-      name: file.name, size: file.size,
-      numChunks
+
+    const random = Math.floor(Math.random(100));
+    const transfer_id = `${file.name}-${random}`;
+
+    const info = { // see syncer.go
+      transfer_id, recipients: state.selectedPeers,
+      name: file.name, size: file.size, numChunks, chunkSize
     };
 
     const ok = await StartFileTransfer(info);
@@ -158,11 +161,8 @@ export default function TransferPane({ state }) {
     for (let i = 0; i < numChunks; i++) {
       const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
       const chunkData = new Uint8Array(await slice.arrayBuffer());
-      const chunk = {
-        data: Array.from(chunkData),
-        chunkIndex: i,
-        recipients: state.selectedPeers
-      };
+      // see syncer.go
+      const chunk = { transfer_id, chunkIndex: i, data: Array.from(chunkData) };
       const ok = await SendFileChunk(chunk);
       if (!ok) {
         console.log("tell the user the error!"); // TODO: stop!
@@ -185,12 +185,11 @@ export default function TransferPane({ state }) {
     }
   };
 
-
   useEffect(() => {
     const startSending = async () => await sendFiles();
 
     if (state.sending)
-       startSending();
+      startSending();
     else {
       state.setPercentages([]);
       state.setSending(false);

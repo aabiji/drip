@@ -15,7 +15,8 @@ type PeerFinder struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
-	syncer *FileSyncer
+	syncer    *FileSyncer
+	appEvents chan Message
 
 	devicePort  int
 	serviceType string
@@ -25,7 +26,7 @@ type PeerFinder struct {
 	server             *mdns.Server
 }
 
-func NewPeerFinder(debugMode bool, t *FileSyncer) PeerFinder {
+func NewPeerFinder(debugMode bool, appEvents chan Message, t *FileSyncer) PeerFinder {
 	return PeerFinder{
 		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
@@ -33,6 +34,7 @@ func NewPeerFinder(debugMode bool, t *FileSyncer) PeerFinder {
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
 		syncer:             t,
+		appEvents:          appEvents,
 	}
 }
 
@@ -57,20 +59,13 @@ func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry) {
 		return // ignore ourselves
 	}
 
-	// This will be used for perfect negotiation. Being polite will
-	// mean we forego our own offer when we receive an offer from a peer.
-	// Being impolite will mean we ignore the peer's offer and continue with
-	// our own. This way, we avoid collisions by knowing that only one peer
-	// is able to initiate a connection
-	polite := peerId < getDeviceName()
-
 	f.mutex.Lock()
 
 	_, exists := f.Peers[peerId]
 	if exists {
 		f.Peers[peerId].LastHeardFrom = time.Now()
 	} else {
-		peer := NewPeer(entry.AddrV4, peerId, polite, f.syncer, entry.Port, f.devicePort)
+		peer := NewPeer(entry.AddrV4, peerId, entry.Port, f.devicePort, f.syncer, f.appEvents)
 		peer.CreateConnection()
 		peer.SetupDataChannels(ctx)
 		f.Peers[peerId] = peer
@@ -80,7 +75,7 @@ func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry) {
 }
 
 // Listen for broadcasts from other devices every 10 seconds
-func (f *PeerFinder) listenForBroadcasts(ctx context.Context, eventChannel chan string) error {
+func (f *PeerFinder) listenForBroadcasts(ctx context.Context) error {
 	// Start lisening to the broadcasts of other devices
 	entriesChannel := make(chan *mdns.ServiceEntry, 25)
 	defer close(entriesChannel)
@@ -88,7 +83,7 @@ func (f *PeerFinder) listenForBroadcasts(ctx context.Context, eventChannel chan 
 	go func() {
 		for entry := range entriesChannel {
 			f.addPeer(ctx, entry)
-			eventChannel <- "peers-updated"
+			f.appEvents <- NewMessage[any](PEERS_UPDATED, nil)
 		}
 	}()
 
@@ -120,12 +115,12 @@ func (f *PeerFinder) listenForBroadcasts(ctx context.Context, eventChannel chan 
 	}
 }
 
-func (f *PeerFinder) Run(eventChannel chan string, ctx context.Context) error {
+func (f *PeerFinder) Run(ctx context.Context) error {
 	if err := f.broadcastOurService(); err != nil {
 		return err
 	}
 
-	if err := f.listenForBroadcasts(ctx, eventChannel); err != nil {
+	if err := f.listenForBroadcasts(ctx); err != nil {
 		return err
 	}
 

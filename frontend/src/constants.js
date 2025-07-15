@@ -1,0 +1,2 @@
+export const TRANSFER_REPLY = 'TRANSFER_REPLY';
+export const PEERS_UPDATED = 'PEERS_UPDATED';

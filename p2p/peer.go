@@ -22,12 +22,22 @@ type Peer struct {
 
 	connection *webrtc.PeerConnection
 	syncer     *FileSyncer
+	appEvents  chan Message
 }
 
-func NewPeer(ip net.IP, id string, polite bool, syncer *FileSyncer, port, devicePort int) *Peer {
+func NewPeer(
+	ip net.IP, id string, port int, devicePort int,
+	syncer *FileSyncer, appEvents chan Message) *Peer {
 	ourAddr := fmt.Sprintf(":%d", devicePort)
 	peerAddr := fmt.Sprintf("%s:%d", ip.String(), port)
 	packets := make(chan Message, 25)
+
+	// This will be used for perfect negotiation. Being polite will
+	// mean we forego our own offer when we receive an offer from a peer.
+	// Being impolite will mean we ignore the peer's offer and continue with
+	// our own. This way, we avoid collisions by knowing that only one peer
+	// is able to initiate a connection
+	polite := id < getDeviceName()
 
 	return &Peer{
 		Id:            id,
@@ -35,6 +45,7 @@ func NewPeer(ip net.IP, id string, polite bool, syncer *FileSyncer, port, device
 		LastHeardFrom: time.Now(),
 		syncer:        syncer,
 		tcpMedium:     &TCPMedium{packets, peerAddr, ourAddr},
+		appEvents:     appEvents,
 	}
 }
 
@@ -91,9 +102,14 @@ func (p *Peer) CreateConnection() {
 
 func (p *Peer) SetupDataChannels(ctx context.Context) {
 	handler := func(msg Message) {
-		response := p.syncer.HandleMessage(msg)
-		if response != nil {
-			p.Webrtc.QueueMessage(*response)
+		// Forward transfer replys to the frontend
+		if msg.MessageType == TRANSFER_REPLY {
+			p.appEvents <- msg
+		}
+
+		reply := p.syncer.HandleMessage(msg)
+		if reply != nil {
+			p.Webrtc.QueueMessage(*reply)
 		}
 	}
 

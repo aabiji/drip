@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"os"
@@ -10,10 +11,10 @@ import (
 
 type App struct {
 	ctx    context.Context
-	events chan string
+	events chan p2p.Message
 
-	syncer p2p.FileSyncer
 	finder p2p.PeerFinder
+	syncer p2p.FileSyncer
 }
 
 func NewApp() *App {
@@ -25,11 +26,34 @@ func NewApp() *App {
 	fullpath := path.Join(home, "Downloads")
 	syncer := p2p.NewFileSyncer(fullpath)
 
-	return &App{
-		events: make(chan string, 10),
-		syncer: syncer,
-		finder: p2p.NewPeerFinder(true, &syncer),
+	events := make(chan p2p.Message, 25)
+
+	finder := p2p.NewPeerFinder(true, events, &syncer)
+
+	return &App{events: events, syncer: syncer, finder: finder}
+}
+
+func createFrontendBindings(jsPath string) error {
+	output, err := os.OpenFile(jsPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
 	}
+	defer output.Close()
+
+	frontendEvents := []string{
+		p2p.TRANSFER_REPLY,
+		p2p.PEERS_UPDATED,
+	}
+
+	for _, event := range frontendEvents {
+		jsLine := fmt.Sprintf("export const %s = '%s';\n", event, event)
+		_, err := output.WriteString(jsLine)
+		if err != nil {
+			return err
+		}
+	}
+
+	return nil
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -37,7 +61,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// launch the peer finder service
 	go func() {
-		if err := a.finder.Run(a.events, a.ctx); err != nil {
+		if err := a.finder.Run(a.ctx); err != nil {
 			panic(err)
 		}
 	}()
@@ -45,9 +69,15 @@ func (a *App) startup(ctx context.Context) {
 	// launch the event emitter service
 	go func() {
 		for event := range a.events {
-			runtime.EventsEmit(a.ctx, event)
+			runtime.EventsEmit(a.ctx, event.MessageType, event)
 		}
 	}()
+
+	// Generate frontend bindings for our event types
+	err := createFrontendBindings("frontend/src/constants.js")
+	if err != nil {
+		panic(err)
+	}
 }
 
 func (a *App) shutdown(ctx context.Context) {

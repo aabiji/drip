@@ -13,25 +13,28 @@ import (
 )
 
 const (
-	// udp webrtc message types
-	OFFER_PACKET = iota
-	ANSWER_PACKET
-	ICE_PACKET
+	// tcp webrtc message types
+	OFFER_PACKET  = "OFFER_PACKET"
+	ANSWER_PACKET = "ANSWER_PACKET"
+	ICE_PACKET    = "ICE_PACKET"
 
 	// file transfer message types
-	TRANSFER_START
-	TRANSFER_CHUNK
-	TRANSFER_REPLY
+	TRANSFER_START = "TRANSFER_START"
+	TRANSFER_CHUNK = "TRANSFER_CHUNK"
+	TRANSFER_REPLY = "TRANSFER_REPLY"
+
+	// general message type
+	PEERS_UPDATED = "PEERS_UPDATED"
 )
 
 // generic message type
 type Message struct {
 	SenderId    string
-	MessageType int
+	MessageType string
 	Data        []byte
 }
 
-func NewMessage[T any](messageType int, value T) Message {
+func NewMessage[T any](messageType string, value T) Message {
 	encoded, err := json.Marshal(value)
 	if err != nil {
 		panic(err)

@@ -14,8 +14,8 @@ type App struct {
 	ctx    context.Context
 	events chan p2p.Message
 
-	finder *p2p.PeerFinder
-	syncer p2p.FileSyncer
+	finder     *p2p.PeerFinder
+	downloader p2p.Downloader
 }
 
 func NewApp() *App {
@@ -25,13 +25,13 @@ func NewApp() *App {
 		panic(err)
 	}
 	fullpath := path.Join(home, "Downloads")
-	syncer := p2p.NewFileSyncer(fullpath)
+	downloader := p2p.NewDownloader(fullpath)
 
 	events := make(chan p2p.Message, 25)
 
-	finder := p2p.NewPeerFinder(true, events, &syncer)
+	finder := p2p.NewPeerFinder(true, events, &downloader)
 
-	return &App{events: events, syncer: syncer, finder: &finder}
+	return &App{events: events, downloader: downloader, finder: &finder}
 }
 
 func createFrontendBindings(jsPath string) error {
@@ -82,7 +82,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	a.syncer.Close()
+	a.downloader.Close()
 	for _, peer := range a.finder.Peers {
 		peer.Close()
 	}
@@ -103,13 +103,12 @@ func (a *App) StartFileTransfer(info p2p.TransferInfo) bool {
 	msg := p2p.NewMessage(p2p.TRANSFER_INFO, info)
 	for _, peerId := range info.Recipients {
 		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
-		a.syncer.SenderMarkTransfer(info)
 	}
 	return true
 }
 
 func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
-	recipients, err := a.syncer.TransferRecipients(chunk.TransferId)
+	recipients, err := a.downloader.TransferRecipients(chunk.TransferId)
 	if err != nil {
 		panic(err) // TODO: tell the user
 	}

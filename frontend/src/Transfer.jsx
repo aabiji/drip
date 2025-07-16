@@ -141,52 +141,117 @@ function ErrorMessage({ message, onRetry }) {
   );
 }
 
-export default function TransferPane({ state }) {
-  // TODO; move this logic out of the component
-  const streamFile = async (file) => {
-    const chunkSize = 1024 * 1024; // 1 megabyte
-    const numChunks = Math.ceil(file.size / chunkSize);
+class Transfer {
+  constructor(file, id, recipient) {
+    this.id = id;
+    this.recipients = recipient;
+    this.filename = file.name;
+    this.filesize = file.size;
 
-    const random = Math.floor(Math.random(100));
-    const transfer_id = `${file.name}-${random}`;
+    this.amountSent = 0;
+    this.currentChunk = undefined;
+    this.lastResponseTime = Date.now();
+    this.fileReader = file.stream().getReader();
+  }
+}
 
-    const info = { // see syncer.go
-      transfer_id, recipients: state.selectedPeers,
-      name: file.name, size: file.size, numChunks, chunkSize
-    };
+async function sendChunk(state, recipient, transferId, advance) {
+  const transfer = state.transfers[recipient].find(t => t.id == transferId);
 
-    const ok = await StartFileTransfer(info);
-    if (!ok) {
-      console.log("tell the user the error!");
+  if (advance) {
+    const { value, done } = await transfer.fileReader.read();
+    transfer.currentChunk = value;
+
+    if (done) { // can remove the transfer from cache
+      state.setTransfers(prev => prev.filter(t => t.id != transfer.id));
       return;
     }
 
-    for (let i = 0; i < numChunks; i++) {
-      const slice = file.slice(i * chunkSize, (i + 1) * chunkSize);
-      const chunkData = new Uint8Array(await slice.arrayBuffer());
-      // see syncer.go
-      const chunk = { transfer_id, chunkIndex: i, data: Array.from(chunkData) };
-      const ok = await SendFileChunk(chunk);
-      if (!ok) {
-        console.log("tell the user the error!"); // TODO: stop!
-        return;
-      }
+    console.log("Sending chunk...", recipient, transferId)
+  } else {
+    console.log("Resending chunk...", recipient, transferId);
+  }
+
+  const chunk = { transferId, data: transfer.currentChunk }; // see downloader.go
+  const ok = await SendFileChunk(chunk);
+  if (!ok) {
+    console.log("couldn't send chunk");
+  }
+}
+
+async function startTransfer(state, file, recipients) {
+  // see downloader.go
+  const random = Math.floor(Math.random() * 100);
+  const transferId = `${file.name}-${random}`;
+  const info = { transferId, recipients, name: file.name, size: file.size };
+
+  // keep record of the transfer
+  for (const peerId of recipients) {
+    const transfer = new Transfer(file, transferId, peerId);
+
+    if (state.transfers[peerId] === undefined)
+      state.setTransfers(prev => ({ ...prev, [peerId]: [transfer] }));
+    else
+      state.setTransfers(prev => ({ ...prev, [peerId]: [...prev[peerId], transfer] }));
+  }
+
+  const ok = await StartFileTransfer(info);
+  if (!ok) {
+    console.log("couldn't start file transfer");
+    return;
+  }
+
+  console.log("Sending transfer info...", transferId);
+}
+
+// Resend a file chunk to peers who haven't responded in
+// a while, assuming that in that case, they didn't get the chunk
+async function resendChunks(state) {
+  for (const peer in state.transfers) {
+    for (const transfer of state.transfers[peer]) {
+      const [now, timeoutSeconds] = [Date.now(), 3];
+      const elapsedSeconds = (now - transfer.lastResponseTime) / 1000;
+      if (elapsedSeconds >= timeoutSeconds)
+        await sendChunk(state, peer, transfer.id, false);
     }
+  }
+}
 
-    // TODO: redirect to upload page
-  };
+// handle a transfer state response we get from a peer
+async function handleTransferState(state, response) {
+  const peerId = response["SenderId"];
+  const json = JSON.parse(atob(response["Data"]));
 
+  const transfer = state.transfers[peerId].find(t => t.id == json["transferId"]);
+  transfer.amountSent += json["amountReceived"];
+  transfer.lastResponseTime = Date.now();
+
+  console.log("Handling peer response...", transfer);
+
+  await sendChunk(state, peerId, json["transferId"], true);
+}
+
+export default function TransferPane({ state }) {
   const sendFiles = async () => {
     if (state.selectedFiles.length == 0 || state.selectedPeers.length == 0) return;
+
     try {
       state.setPercentages(Array(state.selectedFiles.length).fill(0));
       for (const file of state.selectedFiles) {
-        await streamFile(file);
+        await startTransfer(file, state.selectedPeers);
       }
     } catch (error) {
       console.log("tell the user the error!");
     }
   };
+
+  // TODO: resuming transfers???
+
+  setInterval(async () => await resendChunks(state), 10000);
+
+  useEffect(() => {
+    EventsOn(TRANSFER_STATE, (data) => handleTransferState(data));
+  }, []);
 
   useEffect(() => {
     const startSending = async () => await sendFiles();
@@ -199,15 +264,6 @@ export default function TransferPane({ state }) {
       // TODO: stop file transfers
     }
   }, [state.sending]);
-
-  useEffect(() => {
-    // TODO: why are we getting 4 transer replies??
-    // TODO: got a reply (all the chunks that peer has gotten (we know the peer from the message SenderId))
-    //       so just get the next chunk we should send and send that over
-    EventsOn(TRANSFER_STATE, (data) => {
-      console.log("Got a transfer reply", data);
-    });
-  }, []);
 
   return (
     <div className="inner-content">

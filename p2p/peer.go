@@ -22,13 +22,13 @@ type Peer struct {
 	tcpMedium Medium
 
 	connection *webrtc.PeerConnection
-	syncer     *FileSyncer
+	downloader *Downloader
 	appEvents  chan Message
 }
 
 func NewPeer(
 	ip net.IP, id string, port int, devicePort int,
-	syncer *FileSyncer, appEvents chan Message) *Peer {
+	downloader *Downloader, appEvents chan Message) *Peer {
 	ourAddr := fmt.Sprintf(":%d", devicePort)
 	peerAddr := fmt.Sprintf("%s:%d", ip.String(), port)
 	packets := make(chan Message, 25)
@@ -44,7 +44,7 @@ func NewPeer(
 		Id:            id,
 		polite:        polite,
 		LastHeardFrom: time.Now(),
-		syncer:        syncer,
+		downloader:    downloader,
 		tcpMedium:     &TCPMedium{packets, peerAddr, ourAddr},
 		appEvents:     appEvents,
 	}
@@ -106,12 +106,11 @@ func (p *Peer) SetupDataChannels(ctx context.Context) {
 		// Forward transfer replys to the frontend
 		if msg.MessageType == TRANSFER_STATE {
 			p.appEvents <- msg
+			return
 		}
 
-		reply := p.syncer.HandleMessage(msg)
-		if reply != nil {
-			p.Webrtc.QueueMessage(*reply)
-		}
+		reply := p.downloader.HandleMessage(msg)
+		p.Webrtc.QueueMessage(reply)
 	}
 
 	go func() { p.tcpMedium.ForwardMessages(ctx) }()

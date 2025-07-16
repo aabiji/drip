@@ -15,8 +15,8 @@ type PeerFinder struct {
 	Peers map[string]*Peer
 	mutex sync.Mutex // guards Peers
 
-	syncer    *FileSyncer
-	appEvents chan Message
+	downloader *Downloader
+	appEvents  chan Message
 
 	devicePort  int
 	serviceType string
@@ -26,14 +26,14 @@ type PeerFinder struct {
 	server             *mdns.Server
 }
 
-func NewPeerFinder(debugMode bool, appEvents chan Message, t *FileSyncer) PeerFinder {
+func NewPeerFinder(debugMode bool, appEvents chan Message, t *Downloader) PeerFinder {
 	return PeerFinder{
 		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
 		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
-		syncer:             t,
+		downloader:         t,
 		appEvents:          appEvents,
 	}
 }
@@ -65,7 +65,7 @@ func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry) {
 	if exists {
 		f.Peers[peerId].LastHeardFrom = time.Now()
 	} else {
-		peer := NewPeer(entry.AddrV4, peerId, entry.Port, f.devicePort, f.syncer, f.appEvents)
+		peer := NewPeer(entry.AddrV4, peerId, entry.Port, f.devicePort, f.downloader, f.appEvents)
 		peer.CreateConnection()
 		peer.SetupDataChannels(ctx)
 		f.Peers[peerId] = peer

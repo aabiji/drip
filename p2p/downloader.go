@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"fmt"
+	"log"
 	"path"
 
 	"github.com/edsrzf/mmap-go"
@@ -9,44 +10,41 @@ import (
 
 // file transfer message types
 type TransferInfo struct {
-	TransferId string   `json:"transfer_id"`
+	TransferId string   `json:"transferId"`
 	Recipients []string `json:"recipients"`
 	FileName   string   `json:"name"`
 	FileSize   int64    `json:"size"`
-	NumChunks  int      `json:"numChunks"`
-	ChunkSize  int      `json:"chunkSize"`
 }
 
 type FileChunk struct {
-	TransferId string  `json:"transfer_id"`
+	TransferId string  `json:"transferId"`
 	Data       []uint8 `json:"data"`
-	Index      int     `json:"chunkIndex"`
 }
 
 type TransferState struct {
-	TransferId     string `json:"transfer_id"`
-	ChunksReceived []bool `json:"chunks_received"`
+	TransferId     string `json:"transferId"`
+	AmountReceived int64  `json:"amountReceived"`
 	file           mmap.MMap
 }
 
-type FileSyncer struct {
+type Downloader struct {
 	transfers      map[string]TransferInfo
 	states         map[string]*TransferState
 	downloadFolder string
 }
 
-func NewFileSyncer(downloadFolder string) FileSyncer {
+func NewDownloader(downloadFolder string) Downloader {
 	// TODO; load transfers hashmap from a file
 	// and open states for all the entries that are there
 
-	return FileSyncer{
+	return Downloader{
 		transfers:      make(map[string]TransferInfo),
 		states:         make(map[string]*TransferState),
 		downloadFolder: downloadFolder,
 	}
 }
 
-func (f *FileSyncer) Close() {
+func (f *Downloader) Close() {
 	// TODO: save the transfers hashmap to a file
 	for _, state := range f.states {
 		state.file.Flush()
@@ -54,7 +52,7 @@ func (f *FileSyncer) Close() {
 	}
 }
 
-func (f *FileSyncer) TransferRecipients(transferId string) ([]string, error) {
+func (f *Downloader) TransferRecipients(transferId string) ([]string, error) {
 	_, exists := f.transfers[transferId]
 	if !exists {
 		return nil, fmt.Errorf("unknown file transfer %s", transferId)
@@ -62,12 +60,7 @@ func (f *FileSyncer) TransferRecipients(transferId string) ([]string, error) {
 	return f.transfers[transferId].Recipients, nil
 }
 
-func (f *FileSyncer) SenderMarkTransfer(info TransferInfo) {
-	f.transfers[info.TransferId] = info // TODO: send this to the frontend on app open
-	// TODO: the frontend should spawn a web worker to start transferring files
-}
-
-func (f *FileSyncer) HandleMessage(msg Message) *Message {
+func (f *Downloader) HandleMessage(msg Message) Message {
 	switch msg.MessageType {
 	case TRANSFER_INFO:
 		info, err := DeserializeInto[TransferInfo](msg)
@@ -81,16 +74,12 @@ func (f *FileSyncer) HandleMessage(msg Message) *Message {
 			panic(err)
 		}
 		return f.handleChunk(chunk)
-	default:
-		// do nothing...
-		// NOTE: The app's frontend is the one handling peer replies
-		// the backend doesn't actually need to keep track of what chunks
-		// it has sent since the recipients will tell us that info
-		return nil
 	}
+	log.Panicf("Received unkonwn message: %v\n", msg)
+	return Message{}
 }
 
-func (f *FileSyncer) handleInfo(info TransferInfo) *Message {
+func (f *Downloader) handleInfo(info TransferInfo) Message {
 	fullpath := path.Join(f.downloadFolder, info.FileName)
 	contents, err := OpenFile(fullpath, info.FileSize)
 	if err != nil {
@@ -99,25 +88,24 @@ func (f *FileSyncer) handleInfo(info TransferInfo) *Message {
 
 	state := &TransferState{
 		TransferId:     info.TransferId,
-		ChunksReceived: make([]bool, info.NumChunks),
+		AmountReceived: 0,
 		file:           contents,
 	}
 
 	f.states[info.TransferId] = state
 	f.transfers[info.TransferId] = info
 
-	msg := NewMessage(TRANSFER_STATE, *state)
-	return &msg
+	return NewMessage(TRANSFER_STATE, *state)
 }
 
-func (f *FileSyncer) handleChunk(chunk FileChunk) *Message {
+func (f *Downloader) handleChunk(chunk FileChunk) Message {
 	info := f.transfers[chunk.TransferId]
 	state := f.states[chunk.TransferId]
 
 	if err := state.file.Lock(); err != nil {
 		panic(err)
 	}
-	copy(state.file[info.ChunkSize*chunk.Index:], chunk.Data)
+	copy(state.file[state.AmountReceived:], chunk.Data)
 	if err := state.file.Unlock(); err != nil {
 		panic(err)
 	}
@@ -125,9 +113,10 @@ func (f *FileSyncer) handleChunk(chunk FileChunk) *Message {
 		panic(err)
 	}
 
-	state.ChunksReceived[chunk.Index] = true
-	// last chunk, done writing
-	if chunk.Index == info.NumChunks-1 {
+	state.AmountReceived += int64(len(chunk.Data))
+	if state.AmountReceived >= info.FileSize { // last chunk, done writing
 		state.file.Unmap()
 	}
+
+	return NewMessage(TRANSFER_STATE, *state)
 }

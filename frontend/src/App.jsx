@@ -14,12 +14,14 @@ export default function App() {
   const [selectedPeers, setSelectedPeers] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [percentages, setPercentages] = useState([]);
+  const [transfers, setTransfers] = useState({});
   const [sending, setSending] = useState(false);
   let state = {
     selectedPeers, setSelectedPeers,
     selectedFiles, setSelectedFiles,
     percentages, setPercentages,
-    sending, setSending
+    sending, setSending,
+    transfers, setTransfers
   };
 
   return (

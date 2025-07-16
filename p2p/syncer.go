@@ -2,14 +2,13 @@ package p2p
 
 import (
 	"fmt"
-	"log"
 	"path"
 
 	"github.com/edsrzf/mmap-go"
 )
 
 // file transfer message types
-type Transfer struct {
+type TransferInfo struct {
 	TransferId string   `json:"transfer_id"`
 	Recipients []string `json:"recipients"`
 	FileName   string   `json:"name"`
@@ -24,51 +23,54 @@ type FileChunk struct {
 	Index      int     `json:"chunkIndex"`
 }
 
-type Reply struct {
-	ChunksReceived []bool `json:"received"`
+type TransferState struct {
+	TransferId     string `json:"transfer_id"`
+	ChunksReceived []bool `json:"chunks_received"`
+	file           mmap.MMap
 }
 
 type FileSyncer struct {
-	Transfers      map[string]Transfer  // map TransferId to Transfer
-	files          map[string]mmap.MMap // map TransferId to a file
+	transfers      map[string]TransferInfo
+	states         map[string]*TransferState
 	downloadFolder string
 }
 
 func NewFileSyncer(downloadFolder string) FileSyncer {
-	// TODO; load Transfers hashmap from a file
-	// and open files for all the entries that are there
+	// TODO; load transfers hashmap from a file
+	// and open states for all the entries that are there
 
 	return FileSyncer{
-		Transfers:      make(map[string]Transfer),
-		files:          make(map[string]mmap.MMap),
+		transfers:      make(map[string]TransferInfo),
+		states:         make(map[string]*TransferState),
 		downloadFolder: downloadFolder,
 	}
 }
 
 func (f *FileSyncer) Close() {
-	// TODO: save the Transfers hashmap to a file
-	for _, file := range f.files {
-		file.Flush()
-		file.Unmap()
+	// TODO: save the transfers hashmap to a file
+	for _, state := range f.states {
+		state.file.Flush()
+		state.file.Unmap()
 	}
 }
 
 func (f *FileSyncer) TransferRecipients(transferId string) ([]string, error) {
-	_, exists := f.Transfers[transferId]
+	_, exists := f.transfers[transferId]
 	if !exists {
 		return nil, fmt.Errorf("unknown file transfer %s", transferId)
 	}
-	return f.Transfers[transferId].Recipients, nil
+	return f.transfers[transferId].Recipients, nil
 }
 
-func (f *FileSyncer) SenderMarkTransfer(info Transfer) {
-	f.Transfers[info.TransferId] = info
+func (f *FileSyncer) SenderMarkTransfer(info TransferInfo) {
+	f.transfers[info.TransferId] = info // TODO: send this to the frontend on app open
+	// TODO: the frontend should spawn a web worker to start transferring files
 }
 
 func (f *FileSyncer) HandleMessage(msg Message) *Message {
 	switch msg.MessageType {
-	case TRANSFER_START:
-		info, err := DeserializeInto[Transfer](msg)
+	case TRANSFER_INFO:
+		info, err := DeserializeInto[TransferInfo](msg)
 		if err != nil {
 			panic(err)
 		}
@@ -80,49 +82,52 @@ func (f *FileSyncer) HandleMessage(msg Message) *Message {
 		}
 		return f.handleChunk(chunk)
 	default:
-		reply, err := DeserializeInto[Reply](msg)
-		if err != nil {
-			panic(err)
-		}
-		return f.handleReply(reply)
+		// do nothing...
+		// NOTE: The app's frontend is the one handling peer replies
+		// the backend doesn't actually need to keep track of what chunks
+		// it has sent since the recipients will tell us that info
+		return nil
 	}
 }
 
-func (f *FileSyncer) handleInfo(info Transfer) *Message {
+func (f *FileSyncer) handleInfo(info TransferInfo) *Message {
 	fullpath := path.Join(f.downloadFolder, info.FileName)
 	contents, err := OpenFile(fullpath, info.FileSize)
 	if err != nil {
 		panic(err)
 	}
 
-	f.files[info.TransferId] = contents
-	f.Transfers[info.TransferId] = info
+	state := &TransferState{
+		TransferId:     info.TransferId,
+		ChunksReceived: make([]bool, info.NumChunks),
+		file:           contents,
+	}
 
-	msg := NewMessage(TRANSFER_REPLY, Reply{})
+	f.states[info.TransferId] = state
+	f.transfers[info.TransferId] = info
+
+	msg := NewMessage(TRANSFER_STATE, *state)
 	return &msg
 }
 
 func (f *FileSyncer) handleChunk(chunk FileChunk) *Message {
-	info := f.Transfers[chunk.TransferId]
-	file := f.files[chunk.TransferId]
+	info := f.transfers[chunk.TransferId]
+	state := f.states[chunk.TransferId]
 
-	file.Lock()
-	copy(file[info.ChunkSize*chunk.Index:], chunk.Data)
-	file.Unlock()
-	file.Flush() // TODO: faster way?
-
-	// last chunk, done writing
-	if chunk.Index == info.NumChunks-1 {
-		file.Unmap()
-		delete(f.files, info.TransferId)
+	if err := state.file.Lock(); err != nil {
+		panic(err)
+	}
+	copy(state.file[info.ChunkSize*chunk.Index:], chunk.Data)
+	if err := state.file.Unlock(); err != nil {
+		panic(err)
+	}
+	if err := state.file.Flush(); err != nil { // TODO: faster way?
+		panic(err)
 	}
 
-	msg := NewMessage(TRANSFER_REPLY, Reply{})
-	return &msg
-}
-
-func (f *FileSyncer) handleReply(reply Reply) *Message {
-	log.Println("Got a reply!")
-	// TODO: last big question: what should this reply be?????
-	return nil
+	state.ChunksReceived[chunk.Index] = true
+	// last chunk, done writing
+	if chunk.Index == info.NumChunks-1 {
+		state.file.Unmap()
+	}
 }

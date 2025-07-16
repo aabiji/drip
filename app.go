@@ -3,17 +3,18 @@ package main
 import (
 	"context"
 	"fmt"
-	"github.com/aabiji/drip/p2p"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 	"os"
 	"path"
+
+	"github.com/aabiji/drip/p2p"
+	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 type App struct {
 	ctx    context.Context
 	events chan p2p.Message
 
-	finder p2p.PeerFinder
+	finder *p2p.PeerFinder
 	syncer p2p.FileSyncer
 }
 
@@ -30,7 +31,7 @@ func NewApp() *App {
 
 	finder := p2p.NewPeerFinder(true, events, &syncer)
 
-	return &App{events: events, syncer: syncer, finder: finder}
+	return &App{events: events, syncer: syncer, finder: &finder}
 }
 
 func createFrontendBindings(jsPath string) error {
@@ -41,7 +42,7 @@ func createFrontendBindings(jsPath string) error {
 	defer output.Close()
 
 	frontendEvents := []string{
-		p2p.TRANSFER_REPLY,
+		p2p.TRANSFER_STATE,
 		p2p.PEERS_UPDATED,
 	}
 
@@ -90,16 +91,16 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) GetPeers() []string {
 	names := []string{}
-	for name := range a.finder.Peers {
-		if a.finder.Peers[name].Connected() {
+	for name, peer := range a.finder.Peers {
+		if peer.Connected() {
 			names = append(names, name)
 		}
 	}
 	return names
 }
 
-func (a *App) StartFileTransfer(info p2p.Transfer) bool {
-	msg := p2p.NewMessage(p2p.TRANSFER_START, info)
+func (a *App) StartFileTransfer(info p2p.TransferInfo) bool {
+	msg := p2p.NewMessage(p2p.TRANSFER_INFO, info)
 	for _, peerId := range info.Recipients {
 		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
 		a.syncer.SenderMarkTransfer(info)

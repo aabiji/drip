@@ -16,7 +16,7 @@ export namespace p2p {
 	        this.chunkIndex = source["chunkIndex"];
 	    }
 	}
-	export class Transfer {
+	export class TransferInfo {
 	    transfer_id: string;
 	    recipients: string[];
 	    name: string;
@@ -25,7 +25,7 @@ export namespace p2p {
 	    chunkSize: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new Transfer(source);
+	        return new TransferInfo(source);
 	    }
 	
 	    constructor(source: any = {}) {

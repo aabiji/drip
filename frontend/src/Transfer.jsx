@@ -2,7 +2,7 @@ import { useContext, useEffect, useState, useRef } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import { StartFileTransfer, SendFileChunk } from "../wailsjs/go/main/App";
 import { PeersContext } from "./StateProvider";
-import { TRANSFER_REPLY } from "./constants";
+import { TRANSFER_STATE } from "./constants";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 import { ReactComponent as RetryIcon } from "./assets/retry.svg";
@@ -142,6 +142,7 @@ function ErrorMessage({ message, onRetry }) {
 }
 
 export default function TransferPane({ state }) {
+  // TODO; move this logic out of the component
   const streamFile = async (file) => {
     const chunkSize = 1024 * 1024; // 1 megabyte
     const numChunks = Math.ceil(file.size / chunkSize);
@@ -201,7 +202,9 @@ export default function TransferPane({ state }) {
 
   useEffect(() => {
     // TODO: why are we getting 4 transer replies??
-    EventsOn(TRANSFER_REPLY, (data) => {
+    // TODO: got a reply (all the chunks that peer has gotten (we know the peer from the message SenderId))
+    //       so just get the next chunk we should send and send that over
+    EventsOn(TRANSFER_STATE, (data) => {
       console.log("Got a transfer reply", data);
     });
   }, []);

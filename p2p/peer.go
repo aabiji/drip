@@ -3,10 +3,11 @@ package p2p
 import (
 	"context"
 	"fmt"
-	"github.com/pion/webrtc/v4"
 	"log"
 	"net"
 	"time"
+
+	"github.com/pion/webrtc/v4"
 )
 
 type Peer struct {
@@ -103,7 +104,7 @@ func (p *Peer) CreateConnection() {
 func (p *Peer) SetupDataChannels(ctx context.Context) {
 	handler := func(msg Message) {
 		// Forward transfer replys to the frontend
-		if msg.MessageType == TRANSFER_REPLY {
+		if msg.MessageType == TRANSFER_STATE {
 			p.appEvents <- msg
 		}
 

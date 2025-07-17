@@ -11,19 +11,6 @@ const Panes = { Transfer: 0, Received: 1, Settings: 2 };
 export default function App() {
   const [activePane, setActivePane] = useState(Panes.Transfer);
 
-  const [selectedPeers, setSelectedPeers] = useState([]);
-  const [selectedFiles, setSelectedFiles] = useState([]);
-  const [percentages, setPercentages] = useState([]);
-  const [transfers, setTransfers] = useState({});
-  const [sending, setSending] = useState(false);
-  let state = {
-    selectedPeers, setSelectedPeers,
-    selectedFiles, setSelectedFiles,
-    percentages, setPercentages,
-    sending, setSending,
-    transfers, setTransfers
-  };
-
   return (
     <div className="app-wrapper">
       <div className="navbar">
@@ -50,7 +37,7 @@ export default function App() {
       </div>
 
       <div className="content">
-        {activePane == Panes.Transfer && <TransferPane state={state} />}
+        {activePane == Panes.Transfer && <TransferPane />}
         {activePane == Panes.Received && <ReceivedFiles />}
         {activePane == Panes.Settings && <Settings />}
       </div>

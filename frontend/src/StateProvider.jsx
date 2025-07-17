@@ -5,6 +5,7 @@ import { PEERS_UPDATED } from "./constants";
 
 export const PeersContext = createContext([]);
 export const ThemeContext = createContext("light");
+export const TransferContext = createContext(null);
 
 export default function StateProvider({ children }) {
   // Periodically fetch list of peers from the backend
@@ -21,9 +22,24 @@ export default function StateProvider({ children }) {
     document.documentElement.setAttribute("data-theme", theme);
   }, [theme]);
 
+  const [selectedPeers, setSelectedPeers] = useState([]);
+  const [selectedFiles, setSelectedFiles] = useState([]);
+  const [transfers, setTransfers] = useState([]);
+  const [sending, setSending] = useState(false);
+
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
-      <PeersContext.Provider value={peers}>{children}</PeersContext.Provider>
+      <PeersContext.Provider value={peers}>
+        <TransferContext.Provider
+          value={{
+            sending, setSending,
+            transfers, setTransfers,
+            selectedPeers, setSelectedPeers,
+            selectedFiles, setSelectedFiles
+          }}>
+            {children}
+        </TransferContext.Provider>
+      </PeersContext.Provider>
     </ThemeContext.Provider>
   );
 }

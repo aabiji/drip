@@ -242,11 +242,6 @@ body,
   overflow: hidden;
 }
 
-.file-label.disabled {
-  background-color: var(--bg-500);
-  cursor: not-allowed;
-}
-
 .file-label input[type="file"] {
   opacity: 0;
   position: absolute;

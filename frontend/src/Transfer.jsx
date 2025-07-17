@@ -1,15 +1,19 @@
 import { useContext, useEffect, useState, useRef } from "react";
+
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import { StartFileTransfer, SendFileChunk } from "../wailsjs/go/main/App";
+
 import { PeersContext } from "./StateProvider";
+import { TransferContext } from "./StateProvider";
+
 import { TRANSFER_STATE } from "./constants";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
-import { ReactComponent as RetryIcon } from "./assets/retry.svg";
 
-function FileEntry({ name, progress, onClick }) {
+function FileEntry({ name, progress, onClick, recipient }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
+  const msg = recipient !== undefined ? `Sending ${name} to ${recipient}` : name;
 
   useEffect(() => {
     if (progress !== undefined) {
@@ -17,12 +21,12 @@ function FileEntry({ name, progress, onClick }) {
       barElement.current.style.width = `${progress * total}px`;
       setFull(progress >= 1.0);
     }
-  }, []);
+  }, [progress]);
 
   return (
     <div className={!full ? "file-entry" : "file-entry full"}>
       <div className="inner">
-        <p>{name}</p>
+        <p>{msg}</p>
         {onClick !== undefined && <button onClick={onClick}>x</button>}
       </div>
       {progress !== undefined && <div className="progress-bar" ref={barElement}></div>}
@@ -30,15 +34,22 @@ function FileEntry({ name, progress, onClick }) {
   );
 }
 
-function FileAndPeerSelection({ state }) {
+function FileAndPeerSelection({
+  setSending, selectedPeers, setSelectedPeers,
+  selectedFiles, setSelectedFiles
+}) {
   const peers = useContext(PeersContext);
-  const [canSend, setCanSend] = useState(true);
+  const [havePeers, setHavePeers] = useState(false);
+  const [canSend, setCanSend] = useState(false);
 
   // Fetch list of peers from the backend
-  useEffect(() => { setCanSend(peers && peers.length > 0) }, [peers]);
+  useEffect(() => {
+    setHavePeers(peers && peers.length > 0);
+    setCanSend(selectedFiles.length > 0 && selectedPeers.length > 0);
+  }, [peers, selectedFiles]);
 
   const selectPeer = (event, name) => {
-    state.setSelectedPeers((prev) => {
+    setSelectedPeers((prev) => {
       const list = event.target.checked
         ? [...prev, name]
         : prev.filter((peer) => peer != name);
@@ -47,7 +58,7 @@ function FileAndPeerSelection({ state }) {
   };
 
   const addNonDuplicateFiles = (files) => {
-    state.setSelectedFiles((prev) => {
+    setSelectedFiles((prev) => {
       const existing = new Set(prev.map((f) => `${f.name}-${f.size}`));
       const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
       return [...prev, ...unique];
@@ -55,7 +66,7 @@ function FileAndPeerSelection({ state }) {
   };
 
   const removeFile = (name) =>
-    state.setSelectedFiles((prev) => prev.filter((f) => f.name != name));
+    setSelectedFiles((prev) => prev.filter((f) => f.name != name));
 
   const dragOverHandler = (event) => { event.preventDefault(); }
 
@@ -76,7 +87,7 @@ function FileAndPeerSelection({ state }) {
     <div className="inner-content">
       <div className="upper-container">
         <h3> Send to </h3>
-        {canSend ? (
+        {havePeers ? (
           <div className="peers-container">
             {peers.map((name, index) => (
               <div className="peer-entry" key={index}>
@@ -100,43 +111,21 @@ function FileAndPeerSelection({ state }) {
           className="file-input-container"
           onDrop={(event) => dropHandler(event)}
           onDragOver={(event) => dragOverHandler(event)}>
-          <label className={canSend ? "file-label" : "file-label disabled"}>
+          <label className="file-label">
             <UploadIcon className="upload-icon" />
             <p>Drag and drop or choose files</p>
-            <input
-              type="file" disabled={!canSend}
-              onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
+            <input type="file" onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
           </label>
         </div>
         <div className="file-selection-container">
-          {state.selectedFiles.map((file, index) => (
+          {selectedFiles.map((file, index) => (
             <FileEntry key={index} name={file.name} onClick={() => removeFile(file.name)} />
           ))}
         </div>
         <button
           className="send-button" disabled={!canSend}
-          onClick={() => state.setSending(true)}>Send</button>
+          onClick={() => setSending(true)}>Send</button>
       </div>
-    </div>
-  );
-}
-
-/*
-error tray:
-- we have a ErrorContext, where we write error messages
-- then in app.jsx we loop through all the errors and
-  render this component with absolute positioning
-  ErrorTray
-*/
-function ErrorMessage({ message, onRetry }) {
-  return (
-    <div className="error-message">
-      <p>{message}</p>
-      {onRetry !== undefined &&
-        <button className="retry-button">
-          <RetryIcon className="retry-icon" />
-        </button>
-      }
     </div>
   );
 }
@@ -144,26 +133,27 @@ function ErrorMessage({ message, onRetry }) {
 class Transfer {
   constructor(file, id, recipient) {
     this.id = id;
-    this.recipients = recipient;
+    this.recipient = recipient;
+
     this.filename = file.name;
     this.filesize = file.size;
+    this.fileReader = file.stream().getReader();
 
     this.amountSent = 0;
     this.currentChunk = undefined;
     this.lastResponseTime = Date.now();
-    this.fileReader = file.stream().getReader();
   }
 }
 
-async function sendChunk(state, recipient, transferId, advance) {
-  const transfer = state.transfers[recipient].find(t => t.id == transferId);
+async function sendChunk(transfersRef, setTransfers, selectedPeersRef, recipient, transferId, advance) {
+  const transfer = transfersRef.current.find(t => t.id == transferId && t.recipient == recipient);
 
   if (advance) {
     const { value, done } = await transfer.fileReader.read();
     transfer.currentChunk = value;
 
     if (done) { // can remove the transfer from cache
-      state.setTransfers(prev => prev.filter(t => t.id != transfer.id));
+      setTransfers(prev => prev.filter(t => !(t.id == transfer.id && t.recipient == recipient)));
       return;
     }
 
@@ -175,7 +165,7 @@ async function sendChunk(state, recipient, transferId, advance) {
   const chunk = { // see downloader.go
     transferId,
     data: transfer.currentChunk,
-    recipients: state.selectedPeers
+    recipients: selectedPeersRef.current
   };
   const ok = await SendFileChunk(chunk);
   if (!ok) {
@@ -183,24 +173,16 @@ async function sendChunk(state, recipient, transferId, advance) {
   }
 }
 
-async function startTransfer(state, file) {
+async function startTransfer(selectedPeersRef, setTransfers, file) {
   const random = Math.floor(Math.random() * 100);
   const transferId = `${file.name}-${random}`;
   const info = { // see downloader.go
-    transferId, recipients: state.selectedPeers,
+    transferId, recipients: selectedPeersRef.current,
     name: file.name, size: file.size
   };
 
-  // keep record of the transfer
-  for (const peerId of state.selectedPeers) {
-    const transfer = new Transfer(file, transferId, peerId);
-    state.setTransfers(prev => ({
-      ...prev,
-      [peerId]: prev[peerId] === undefined
-        ? [ transfer ] : [...prev[peerId], transfer]
-    }));
-    console.log("Saving transfer...", peerId);
-  }
+  const updates = selectedPeersRef.current.map(peer => new Transfer(file, transferId, peer));
+  setTransfers(prev => [...prev, ...updates]);
 
   const ok = await StartFileTransfer(info);
   if (!ok) {
@@ -208,79 +190,105 @@ async function startTransfer(state, file) {
     return;
   }
 
-  console.log("Sending transfer info...", transferId);
+  console.log("Sending transfer info...", transferId, updates);
 }
 
 // Resend a file chunk to peers who haven't responded in
 // a while, assuming that in that case, they didn't get the chunk
-async function resendChunks(state) {
-  for (const peer in state.transfers) {
-    for (const transfer of state.transfers[peer]) {
-      const [now, timeoutSeconds] = [Date.now(), 3];
-      const elapsedSeconds = (now - transfer.lastResponseTime) / 1000;
-      if (elapsedSeconds >= timeoutSeconds)
-        await sendChunk(state, peer, transfer.id, false);
-    }
+async function resendChunks(transfersRef, setTransfers, selectedPeersRef) {
+  for (const transfer of transfersRef.current) {
+    const [now, timeoutSeconds] = [Date.now(), 3];
+    const elapsedSeconds = (now - transfer.lastResponseTime) / 1000;
+    if (elapsedSeconds >= timeoutSeconds)
+      await sendChunk(
+        transfersRef, setTransfers, selectedPeersRef,
+        transfer.recipient, transfer.id, false);
   }
 }
 
 // handle a transfer state response we get from a peer
-async function handleTransferState(state, response) {
+async function handleTransferState(transfersRef, setTransfers, selectedPeersRef, response) {
   const peerId = response["senderId"];
   const json = JSON.parse(atob(response["data"]));
 
-  console.log(state.transfers[peerId], peerId);
-  const transfer = state.transfers[peerId].find(t => t.id == json["transferId"]);
-  transfer.amountSent += json["amountReceived"];
-  transfer.lastResponseTime = Date.now();
+  const index = transfersRef.current.findIndex(t => t.id == json["transferId"] && t.recipient == peerId);
+  const transfer = transfersRef.current[index];
 
-  console.log("Handling peer response...", transfer);
+  setTransfers(prev =>
+    prev.map(t => {
+      if (t.id === json["transferId"] && t.recipient === peerId) {
+        return {
+          ...t, amountSent: t.amountSent + json["amountReceived"],
+          lastResponseTime: Date.now()
+        };
+      }
+      return t;
+    })
+  );
 
-  await sendChunk(state, peerId, json["transferId"], true);
+  await sendChunk(transfersRef, setTransfers, selectedPeersRef, peerId, json["transferId"], true);
 }
 
-export default function TransferPane({ state }) {
-  const sendFiles = async () => {
-    if (state.selectedFiles.length == 0 || state.selectedPeers.length == 0) return;
+export default function TransferPane() {
+  const {
+    sending, setSending,
+    transfers, setTransfers,
+    selectedPeers, setSelectedPeers,
+    selectedFiles, setSelectedFiles
+  } = useContext(TransferContext);
 
-    state.setPercentages(Array(state.selectedFiles.length).fill(0));
-    for (const file of state.selectedFiles) {
-      await startTransfer(state, file);
-    }
-  };
-
-  // TODO: resuming transfers???
-
-  setInterval(async () => await resendChunks(state), 10000);
-
+  const transfersRef = useRef(transfers);
+  const selectedPeersRef = useRef(selectedPeers);
   useEffect(() => {
-    EventsOn(TRANSFER_STATE, (data) => handleTransferState(state, data));
-  }, []);
+    transfersRef.current = transfers;
+    selectedPeersRef.current = selectedPeers;
+  }, [transfers, selectedPeers]);
+
+  const sendFiles = async () => {
+    if (selectedFiles.length == 0 || selectedPeers.length == 0)
+      return;
+    for (const file of selectedFiles) {
+      await startTransfer(selectedPeersRef, setTransfers, file);
+    }
+    setSelectedFiles([]);
+    setSelectedPeers([]);
+  };
 
   useEffect(() => {
     const startSending = async () => await sendFiles();
+    if (sending) startSending();
+    // TODO: else, stop the file transfers
+  }, [sending]);
 
-    if (state.sending)
-      startSending();
-    else {
-      state.setPercentages([]);
-      state.setSending(false);
-      // TODO: stop file transfers
+  // TODO: resuming transfers???
+  useEffect(() => {
+    const cancelListener =
+      EventsOn(TRANSFER_STATE, (data) => handleTransferState(transfersRef, setTransfers, selectedPeersRef, data));
+
+    const intervalId = setInterval(async () =>
+      await resendChunks(transfersRef, setTransfers, selectedPeersRef), 10000);
+    return () => {
+      cancelListener();
+      clearInterval(intervalId);
     }
-  }, [state.sending]);
+  }, []);
 
   return (
     <div className="inner-content">
-      {!state.sending && <FileAndPeerSelection state={state} />}
-      {state.sending &&
+      {!sending &&
+        <FileAndPeerSelection
+          setSending={setSending}
+          selectedPeers={selectedPeers} setSelectedPeers={setSelectedPeers}
+          selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
+      {sending &&
         <div className="inner-content">
           <div className="status-top-row">
-            <button onClick={() => state.setSending(false)}> Cancel </button>
+            <button onClick={() => setSending(false)}> Cancel </button>
             <h1> Sending </h1>
           </div>
           <div className="progress-container">
-            {state.percentages.map((p, index) =>
-              <FileEntry key={index} name={state.selectedFiles[index].name} progress={p} />
+            {transfers.map((t, index) =>
+              <FileEntry key={index} name={t.filename} recipient={t.recipient} progress={t.amountSent / t.filesize} />
             )}
           </div>
           <div className="error-tray">{/* TODO: error messages go here */}</div>

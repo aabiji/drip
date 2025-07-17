@@ -74,6 +74,7 @@ type Medium interface {
 	ForwardMessages(ctx context.Context)
 	ReceiveMessages(ctx context.Context, handler func(msg Message))
 	Connected() bool
+	Close()
 }
 
 type TCPMedium struct {
@@ -84,7 +85,9 @@ type TCPMedium struct {
 
 func (t *TCPMedium) QueueMessage(msg Message) { t.packets <- msg }
 
-func (t *TCPMedium) Connected() bool { return false } // placeholder function
+// placeholders
+func (t *TCPMedium) Connected() bool { return false }
+func (t *TCPMedium) Close()          {}
 
 func sendTCPMessage(conn net.Conn, msg Message) error {
 	data := msg.Serialize()
@@ -194,6 +197,7 @@ type WebRTCMedium struct {
 }
 
 func (w *WebRTCMedium) Connected() bool { return w.connected }
+func (w *WebRTCMedium) Close()          { w.dataChannel.GracefulClose() }
 
 func NewWebRTCMedium(channel *webrtc.DataChannel) *WebRTCMedium {
 	m := &WebRTCMedium{

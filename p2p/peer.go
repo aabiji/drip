@@ -15,7 +15,6 @@ type Peer struct {
 	LastHeardFrom time.Time
 
 	makingOffer bool
-	connected   bool
 	polite      bool
 
 	Webrtc    Medium
@@ -50,9 +49,21 @@ func NewPeer(
 	}
 }
 
-func (p *Peer) Close() { p.connection.Close() }
+// Will also call the dataChannel's OnClose
+func (p *Peer) Close() {
+	if p.connection != nil {
+		p.connection.Close()
+		p.connection = nil
+	}
+	if p.Webrtc != nil {
+		p.Webrtc.Close()
+		p.Webrtc = nil
+	}
+}
 
-func (p *Peer) Connected() bool { return p.Webrtc.Connected() || p.connected }
+// The default value for an interface is nil, so we want to avoid
+// panicking when we haven't opened/received a data channel connection yet
+func (p *Peer) Connected() bool { return p.Webrtc != nil && p.Webrtc.Connected() }
 
 func (p *Peer) CreateConnection() {
 	var err error
@@ -67,12 +78,10 @@ func (p *Peer) CreateConnection() {
 	p.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
 		switch state {
 		case webrtc.PeerConnectionStateConnected:
-			p.connected = true
 		case webrtc.PeerConnectionStateDisconnected,
 			webrtc.PeerConnectionStateFailed,
 			webrtc.PeerConnectionStateClosed:
-			p.connected = false
-			p.handlePeerDisconnect()
+			p.Close()
 		default:
 			// do nothing
 		}
@@ -133,12 +142,6 @@ func (p *Peer) SetupDataChannels(ctx context.Context) {
 		p.Webrtc.ForwardMessages(ctx)
 		p.Webrtc.ReceiveMessages(ctx, handler)
 	}
-}
-
-func (p *Peer) handlePeerDisconnect() {
-	log.Println("TODO: Handle peer disconnect")
-	// TODO! --> peer disconnected or the data channel closed
-	p.connected = false
 }
 
 func (p *Peer) handleOffer(msg Message) {

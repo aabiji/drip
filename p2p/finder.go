@@ -42,7 +42,7 @@ func (f *PeerFinder) GetConnectedPeers() []string {
 	f.mutex.Lock()
 	var ids []string
 	for id, peer := range f.Peers {
-		if peer != nil && peer.Connected() {
+		if peer.Connected() {
 			ids = append(ids, id)
 		}
 	}

@@ -136,7 +136,7 @@ func (p *Peer) SetupDataChannels(ctx context.Context) {
 }
 
 func (p *Peer) handlePeerDisconnect() {
-	log.Println("Peer disconnected")
+	log.Println("TODO: Handle peer disconnect")
 	// TODO! --> peer disconnected or the data channel closed
 	p.connected = false
 }

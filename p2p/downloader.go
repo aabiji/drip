@@ -1,7 +1,6 @@
 package p2p
 
 import (
-	"fmt"
 	"log"
 	"path"
 
@@ -17,8 +16,9 @@ type TransferInfo struct {
 }
 
 type FileChunk struct {
-	TransferId string  `json:"transferId"`
-	Data       []uint8 `json:"data"`
+	TransferId string   `json:"transferId"`
+	Recipients []string `json:"recipients"`
+	Data       []uint8  `json:"data"`
 }
 
 type TransferState struct {
@@ -50,14 +50,6 @@ func (f *Downloader) Close() {
 		state.file.Flush()
 		state.file.Unmap()
 	}
-}
-
-func (f *Downloader) TransferRecipients(transferId string) ([]string, error) {
-	_, exists := f.transfers[transferId]
-	if !exists {
-		return nil, fmt.Errorf("unknown file transfer %s", transferId)
-	}
-	return f.transfers[transferId].Recipients, nil
 }
 
 func (f *Downloader) HandleMessage(msg Message) Message {

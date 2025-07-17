@@ -38,6 +38,18 @@ func NewPeerFinder(debugMode bool, appEvents chan Message, t *Downloader) PeerFi
 	}
 }
 
+func (f *PeerFinder) GetConnectedPeers() []string {
+	f.mutex.Lock()
+	var ids []string
+	for id, peer := range f.Peers {
+		if peer != nil && peer.Connected() {
+			ids = append(ids, id)
+		}
+	}
+	f.mutex.Unlock()
+	return ids
+}
+
 func (f *PeerFinder) broadcastOurService() error {
 	id := getDeviceName()
 	hostname := fmt.Sprintf("%s.local.", id)

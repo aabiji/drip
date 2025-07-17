@@ -2,6 +2,7 @@ export namespace p2p {
 	
 	export class FileChunk {
 	    transferId: string;
+	    recipients: string[];
 	    data: number[];
 	
 	    static createFrom(source: any = {}) {
@@ -11,6 +12,7 @@ export namespace p2p {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.transferId = source["transferId"];
+	        this.recipients = source["recipients"];
 	        this.data = source["data"];
 	    }
 	}

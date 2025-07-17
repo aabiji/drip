@@ -172,27 +172,34 @@ async function sendChunk(state, recipient, transferId, advance) {
     console.log("Resending chunk...", recipient, transferId);
   }
 
-  const chunk = { transferId, data: transfer.currentChunk }; // see downloader.go
+  const chunk = { // see downloader.go
+    transferId,
+    data: transfer.currentChunk,
+    recipients: state.selectedPeers
+  };
   const ok = await SendFileChunk(chunk);
   if (!ok) {
     console.log("couldn't send chunk");
   }
 }
 
-async function startTransfer(state, file, recipients) {
-  // see downloader.go
+async function startTransfer(state, file) {
   const random = Math.floor(Math.random() * 100);
   const transferId = `${file.name}-${random}`;
-  const info = { transferId, recipients, name: file.name, size: file.size };
+  const info = { // see downloader.go
+    transferId, recipients: state.selectedPeers,
+    name: file.name, size: file.size
+  };
 
   // keep record of the transfer
-  for (const peerId of recipients) {
+  for (const peerId of state.selectedPeers) {
     const transfer = new Transfer(file, transferId, peerId);
-
-    if (state.transfers[peerId] === undefined)
-      state.setTransfers(prev => ({ ...prev, [peerId]: [transfer] }));
-    else
-      state.setTransfers(prev => ({ ...prev, [peerId]: [...prev[peerId], transfer] }));
+    state.setTransfers(prev => ({
+      ...prev,
+      [peerId]: prev[peerId] === undefined
+        ? [ transfer ] : [...prev[peerId], transfer]
+    }));
+    console.log("Saving transfer...", peerId);
   }
 
   const ok = await StartFileTransfer(info);
@@ -219,9 +226,10 @@ async function resendChunks(state) {
 
 // handle a transfer state response we get from a peer
 async function handleTransferState(state, response) {
-  const peerId = response["SenderId"];
-  const json = JSON.parse(atob(response["Data"]));
+  const peerId = response["senderId"];
+  const json = JSON.parse(atob(response["data"]));
 
+  console.log(state.transfers[peerId], peerId);
   const transfer = state.transfers[peerId].find(t => t.id == json["transferId"]);
   transfer.amountSent += json["amountReceived"];
   transfer.lastResponseTime = Date.now();
@@ -235,13 +243,9 @@ export default function TransferPane({ state }) {
   const sendFiles = async () => {
     if (state.selectedFiles.length == 0 || state.selectedPeers.length == 0) return;
 
-    try {
-      state.setPercentages(Array(state.selectedFiles.length).fill(0));
-      for (const file of state.selectedFiles) {
-        await startTransfer(file, state.selectedPeers);
-      }
-    } catch (error) {
-      console.log("tell the user the error!");
+    state.setPercentages(Array(state.selectedFiles.length).fill(0));
+    for (const file of state.selectedFiles) {
+      await startTransfer(state, file);
     }
   };
 
@@ -250,7 +254,7 @@ export default function TransferPane({ state }) {
   setInterval(async () => await resendChunks(state), 10000);
 
   useEffect(() => {
-    EventsOn(TRANSFER_STATE, (data) => handleTransferState(data));
+    EventsOn(TRANSFER_STATE, (data) => handleTransferState(state, data));
   }, []);
 
   useEffect(() => {

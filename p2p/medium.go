@@ -29,9 +29,9 @@ const (
 
 // generic message type
 type Message struct {
-	SenderId    string
-	MessageType string
-	Data        []byte
+	SenderId    string `json:"senderId"`
+	MessageType string `json:"messageType"`
+	Data        []byte `json:"data"`
 }
 
 func NewMessage[T any](messageType string, value T) Message {
@@ -174,7 +174,9 @@ func (t *TCPMedium) ReceiveMessages(ctx context.Context, handler func(msg Messag
 					return // quit
 				default:
 					data, err := readFramedMessage(conn)
-					if err != nil {
+					if err == io.EOF {
+						return // Couldn't read this message in full, so ignore
+					} else if err != nil {
 						panic(err)
 					}
 					msg := Deserialize(data)
@@ -202,6 +204,7 @@ func NewWebRTCMedium(channel *webrtc.DataChannel) *WebRTCMedium {
 	m.dataChannel.OnClose(func() {
 		close(m.pending)
 		m.connected = false
+		log.Println("Closing the data channel...")
 	})
 	return m
 }

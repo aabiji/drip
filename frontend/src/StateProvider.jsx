@@ -24,7 +24,7 @@ export default function StateProvider({ children }) {
 
   const [selectedPeers, setSelectedPeers] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
-  const [transfers, setTransfers] = useState([]);
+  const [transferIds, setTransferIds] = useState([]);
   const [sending, setSending] = useState(false);
 
   return (
@@ -33,7 +33,7 @@ export default function StateProvider({ children }) {
         <TransferContext.Provider
           value={{
             sending, setSending,
-            transfers, setTransfers,
+            transferIds, setTransferIds,
             selectedPeers, setSelectedPeers,
             selectedFiles, setSelectedFiles
           }}>

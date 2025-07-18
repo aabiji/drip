@@ -12,16 +12,17 @@ import (
 
 // file transfer message types
 type TransferInfo struct {
-	TransferId string   `json:"transferId"`
-	Recipients []string `json:"recipients"`
-	FileName   string   `json:"name"`
-	FileSize   int64    `json:"size"`
+	TransferId string `json:"transferId"`
+	Recipient  string `json:"recipient"`
+	FileName   string `json:"name"`
+	FileSize   int64  `json:"size"`
 }
 
 type FileChunk struct {
-	TransferId string   `json:"transferId"`
-	Recipients []string `json:"recipients"`
-	Data       []uint8  `json:"data"`
+	TransferId string  `json:"transferId"`
+	Recipient  string  `json:"recipient"`
+	Data       []uint8 `json:"data"`
+	Offset     int64   `json:"offset"`
 }
 
 type TransferState struct {
@@ -136,11 +137,17 @@ func (d *Downloader) handleInfo(info TransferInfo) Message {
 func (d *Downloader) handleChunk(chunk FileChunk) Message {
 	info := d.Transfers[chunk.TransferId]
 	state := d.States[chunk.TransferId]
+	chunkSize := int64(len(chunk.Data))
+
+	// already got this chunk, ignore
+	if state.AmountReceived >= chunk.Offset+chunkSize {
+		return NewMessage(TRANSFER_STATE, *state)
+	}
 
 	if err := state.file.Lock(); err != nil {
 		panic(err)
 	}
-	copy(state.file[state.AmountReceived:], chunk.Data)
+	copy(state.file[chunk.Offset:], chunk.Data)
 	if err := state.file.Unlock(); err != nil {
 		panic(err)
 	}
@@ -148,7 +155,7 @@ func (d *Downloader) handleChunk(chunk FileChunk) Message {
 		panic(err)
 	}
 
-	state.AmountReceived += int64(len(chunk.Data))
+	state.AmountReceived = chunk.Offset + chunkSize
 	if state.AmountReceived >= info.FileSize { // last chunk, done writing
 		state.file.Unmap()
 	}

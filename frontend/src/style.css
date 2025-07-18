@@ -154,10 +154,6 @@ body,
   border-radius: 8px;
 }
 
-.peer-entry:hover {
-  border: 1px solid var(--aceent-500);
-}
-
 .custom-checkbox {
   position: relative;
   width: 20px;

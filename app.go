@@ -95,18 +95,13 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 
-func (a *App) StartFileTransfer(info p2p.TransferInfo) bool {
+// the following functions are exported to the frontend
+func (a *App) StartFileTransfer(info p2p.TransferInfo) {
 	msg := p2p.NewMessage(p2p.TRANSFER_INFO, info)
-	for _, peerId := range info.Recipients {
-		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
-	}
-	return true
+	a.finder.Peers[info.Recipient].Webrtc.QueueMessage(msg)
 }
 
-func (a *App) SendFileChunk(chunk p2p.FileChunk) bool {
+func (a *App) SendFileChunk(chunk p2p.FileChunk) {
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
-	for _, peerId := range chunk.Recipients {
-		a.finder.Peers[peerId].Webrtc.QueueMessage(msg)
-	}
-	return true
+	a.finder.Peers[chunk.Recipient].Webrtc.QueueMessage(msg)
 }

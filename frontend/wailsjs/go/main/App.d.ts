@@ -4,6 +4,6 @@ import {p2p} from '../models';
 
 export function GetPeers():Promise<Array<string>>;
 
-export function SendFileChunk(arg1:p2p.FileChunk):Promise<boolean>;
+export function SendFileChunk(arg1:p2p.FileChunk):Promise<void>;
 
-export function StartFileTransfer(arg1:p2p.TransferInfo):Promise<boolean>;
+export function StartFileTransfer(arg1:p2p.TransferInfo):Promise<void>;

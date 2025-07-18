@@ -33,7 +33,7 @@ export default function Settings() {
         <p className="input-label">Download folder</p>
         <label className="folder-label">
           <p className="path">{downloadPath}</p>
-          <input type="file" webkitdirectory className="folder-path-input" />
+          <input type="file" webkitdirectory="true" className="folder-path-input" />
         </label>
       </div>
 

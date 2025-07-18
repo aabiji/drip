@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path"
 
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -14,24 +13,26 @@ type App struct {
 	ctx    context.Context
 	events chan p2p.Message
 
-	finder     *p2p.PeerFinder
-	downloader p2p.Downloader
+	finder       *p2p.PeerFinder
+	downloader   p2p.Downloader
+	settingsPath string
 }
 
 func NewApp() *App {
-	// TODO: read from settings json file
-	home, err := os.UserHomeDir()
+	settingsPath := "drip-state.json"
+	downloader, err := p2p.NewDownloader(settingsPath)
 	if err != nil {
 		panic(err)
 	}
-	fullpath := path.Join(home, "Downloads")
-	downloader := p2p.NewDownloader(fullpath)
-
 	events := make(chan p2p.Message, 25)
-
 	finder := p2p.NewPeerFinder(true, events, &downloader)
 
-	return &App{events: events, downloader: downloader, finder: &finder}
+	return &App{
+		events:       events,
+		downloader:   downloader,
+		finder:       &finder,
+		settingsPath: settingsPath,
+	}
 }
 
 func createFrontendBindings(jsPath string) error {
@@ -82,7 +83,10 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	a.downloader.Close()
+	err := a.downloader.Close(a.settingsPath)
+	if err != nil {
+		panic(err)
+	}
 	for _, peer := range a.finder.Peers {
 		peer.Close()
 	}

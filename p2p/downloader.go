@@ -1,8 +1,11 @@
 package p2p
 
 import (
+	"encoding/json"
 	"log"
+	"os"
 	"path"
+	"strings"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -28,51 +31,91 @@ type TransferState struct {
 }
 
 type Downloader struct {
-	transfers      map[string]TransferInfo
-	states         map[string]*TransferState
-	downloadFolder string
+	Transfers      map[string]TransferInfo   `json:"transfers"`
+	States         map[string]*TransferState `json:"states"`
+	DownloadFolder string                    `json:"downloadFolder"`
 }
 
-func NewDownloader(downloadFolder string) Downloader {
-	// TODO; load transfers hashmap from a file
-	// and open states for all the entries that are there
-
-	return Downloader{
-		transfers:      make(map[string]TransferInfo),
-		states:         make(map[string]*TransferState),
-		downloadFolder: downloadFolder,
+func NewDownloader(settingsPath string) (Downloader, error) {
+	exists, err := fileExists(settingsPath)
+	if err != nil {
+		return Downloader{}, err
 	}
+
+	downloader := Downloader{}
+	if exists {
+		contents, err := os.ReadFile(settingsPath)
+		if err != nil {
+			return Downloader{}, err
+		}
+
+		err = json.Unmarshal(contents, &downloader)
+		if err != nil {
+			return Downloader{}, err
+		}
+	} else {
+		downloader.Transfers = make(map[string]TransferInfo)
+		downloader.States = make(map[string]*TransferState)
+	}
+
+	// set a default path
+	if len(strings.TrimSpace(downloader.DownloadFolder)) == 0 {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			panic(err)
+		}
+		downloader.DownloadFolder = path.Join(home, "Downloads")
+	}
+
+	// open files associated to ongoing transfers
+	for transferId, info := range downloader.Transfers {
+		state := downloader.States[transferId]
+		fullpath := path.Join(downloader.DownloadFolder, info.FileName)
+		state.file, err = OpenFile(fullpath, info.FileSize)
+		if err != nil {
+			return Downloader{}, err
+		}
+	}
+
+	return downloader, nil
 }
 
-func (f *Downloader) Close() {
-	// TODO: save the transfers hashmap to a file
-	for _, state := range f.states {
+func (d *Downloader) Close(settingsFile string) error {
+	for _, state := range d.States {
 		state.file.Flush()
 		state.file.Unmap()
 	}
+
+	// save state -- TODO: test later
+	//jsonData, err := json.Marshal(*d)
+	//if err != nil {
+	//	return err
+	//}
+	//return os.WriteFile(settingsFile, jsonData, 0644)
+	return nil
 }
 
-func (f *Downloader) HandleMessage(msg Message) Message {
+func (d *Downloader) HandleMessage(msg Message) Message {
 	switch msg.MessageType {
 	case TRANSFER_INFO:
 		info, err := DeserializeInto[TransferInfo](msg)
 		if err != nil {
 			panic(err)
 		}
-		return f.handleInfo(info)
+		return d.handleInfo(info)
 	case TRANSFER_CHUNK:
 		chunk, err := DeserializeInto[FileChunk](msg)
 		if err != nil {
 			panic(err)
 		}
-		return f.handleChunk(chunk)
+		return d.handleChunk(chunk)
 	}
 	log.Panicf("Received unkonwn message: %v\n", msg)
 	return Message{}
 }
 
-func (f *Downloader) handleInfo(info TransferInfo) Message {
-	fullpath := path.Join(f.downloadFolder, info.FileName)
+func (d *Downloader) handleInfo(info TransferInfo) Message {
+	fullpath := path.Join(d.DownloadFolder, info.FileName)
 	contents, err := OpenFile(fullpath, info.FileSize)
 	if err != nil {
 		panic(err)
@@ -84,15 +127,15 @@ func (f *Downloader) handleInfo(info TransferInfo) Message {
 		file:           contents,
 	}
 
-	f.states[info.TransferId] = state
-	f.transfers[info.TransferId] = info
+	d.States[info.TransferId] = state
+	d.Transfers[info.TransferId] = info
 
 	return NewMessage(TRANSFER_STATE, *state)
 }
 
-func (f *Downloader) handleChunk(chunk FileChunk) Message {
-	info := f.transfers[chunk.TransferId]
-	state := f.states[chunk.TransferId]
+func (d *Downloader) handleChunk(chunk FileChunk) Message {
+	info := d.Transfers[chunk.TransferId]
+	state := d.States[chunk.TransferId]
 
 	if err := state.file.Lock(); err != nil {
 		panic(err)

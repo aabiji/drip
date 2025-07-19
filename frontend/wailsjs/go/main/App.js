@@ -6,6 +6,10 @@ export function GetPeers() {
   return window['go']['main']['App']['GetPeers']();
 }
 
+export function SendCancelSignal(arg1) {
+  return window['go']['main']['App']['SendCancelSignal'](arg1);
+}
+
 export function SendFileChunk(arg1) {
   return window['go']['main']['App']['SendFileChunk'](arg1);
 }

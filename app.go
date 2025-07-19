@@ -14,7 +14,7 @@ type App struct {
 	events chan p2p.Message
 
 	finder       *p2p.PeerFinder
-	downloader   p2p.Downloader
+	downloader   *p2p.Downloader
 	settingsPath string
 }
 
@@ -25,7 +25,7 @@ func NewApp() *App {
 		panic(err)
 	}
 	events := make(chan p2p.Message, 25)
-	finder := p2p.NewPeerFinder(true, events, &downloader)
+	finder := p2p.NewPeerFinder(true, events, downloader)
 
 	return &App{
 		events:       events,
@@ -43,7 +43,7 @@ func createFrontendBindings(jsPath string) error {
 	defer output.Close()
 
 	frontendEvents := []string{
-		p2p.TRANSFER_STATE,
+		p2p.TRANSFER_RESPONSE,
 		p2p.PEERS_UPDATED,
 	}
 
@@ -101,7 +101,12 @@ func (a *App) StartFileTransfer(info p2p.TransferInfo) {
 	a.finder.Peers[info.Recipient].Webrtc.QueueMessage(msg)
 }
 
-func (a *App) SendFileChunk(chunk p2p.FileChunk) {
+func (a *App) SendFileChunk(chunk p2p.TransferChunk) {
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
 	a.finder.Peers[chunk.Recipient].Webrtc.QueueMessage(msg)
+}
+
+func (a *App) SendCancelSignal(signal p2p.TransferCancel) {
+	msg := p2p.NewMessage(p2p.TRANSFER_CANCEL, signal)
+	a.finder.Peers[signal.Recipient].Webrtc.QueueMessage(msg)
 }

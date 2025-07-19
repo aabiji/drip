@@ -112,8 +112,8 @@ func (p *Peer) CreateConnection() {
 
 func (p *Peer) SetupDataChannels(ctx context.Context) {
 	handler := func(msg Message) {
-		// Forward transfer replys to the frontend
-		if msg.MessageType == TRANSFER_STATE {
+		// Forward transfer replies to the frontend
+		if msg.MessageType == TRANSFER_RESPONSE {
 			p.appEvents <- msg
 			return
 		}

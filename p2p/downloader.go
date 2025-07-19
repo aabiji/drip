@@ -6,6 +6,7 @@ import (
 	"os"
 	"path"
 	"strings"
+	"sync"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -18,45 +19,52 @@ type TransferInfo struct {
 	FileSize   int64  `json:"size"`
 }
 
-type FileChunk struct {
+type TransferChunk struct {
 	TransferId string  `json:"transferId"`
 	Recipient  string  `json:"recipient"`
 	Data       []uint8 `json:"data"`
 	Offset     int64   `json:"offset"`
 }
 
-type TransferState struct {
+type TransferCancel struct {
+	TransferId string `json:"transferId"`
+	Recipient  string `json:"recipient"`
+}
+
+type TransferResponse struct {
 	TransferId     string `json:"transferId"`
 	AmountReceived int64  `json:"amountReceived"`
+	Cancelled      bool   `json:"cancelled"`
 	file           mmap.MMap
 }
 
 type Downloader struct {
-	Transfers      map[string]TransferInfo   `json:"transfers"`
-	States         map[string]*TransferState `json:"states"`
-	DownloadFolder string                    `json:"downloadFolder"`
+	mutex          sync.Mutex
+	Transfers      map[string]TransferInfo      `json:"transfers"`
+	States         map[string]*TransferResponse `json:"states"`
+	DownloadFolder string                       `json:"downloadFolder"`
 }
 
-func NewDownloader(settingsPath string) (Downloader, error) {
+func NewDownloader(settingsPath string) (*Downloader, error) {
 	exists, err := fileExists(settingsPath)
 	if err != nil {
-		return Downloader{}, err
+		return nil, err
 	}
 
-	downloader := Downloader{}
+	downloader := &Downloader{}
 	if exists {
 		contents, err := os.ReadFile(settingsPath)
 		if err != nil {
-			return Downloader{}, err
+			return nil, err
 		}
 
 		err = json.Unmarshal(contents, &downloader)
 		if err != nil {
-			return Downloader{}, err
+			return nil, err
 		}
 	} else {
 		downloader.Transfers = make(map[string]TransferInfo)
-		downloader.States = make(map[string]*TransferState)
+		downloader.States = make(map[string]*TransferResponse)
 	}
 
 	// set a default path
@@ -74,7 +82,7 @@ func NewDownloader(settingsPath string) (Downloader, error) {
 		fullpath := path.Join(downloader.DownloadFolder, info.FileName)
 		state.file, err = OpenFile(fullpath, info.FileSize)
 		if err != nil {
-			return Downloader{}, err
+			return nil, err
 		}
 	}
 
@@ -105,11 +113,17 @@ func (d *Downloader) HandleMessage(msg Message) Message {
 		}
 		return d.handleInfo(info)
 	case TRANSFER_CHUNK:
-		chunk, err := DeserializeInto[FileChunk](msg)
+		chunk, err := DeserializeInto[TransferChunk](msg)
 		if err != nil {
 			panic(err)
 		}
 		return d.handleChunk(chunk)
+	case TRANSFER_CANCEL:
+		info, err := DeserializeInto[TransferCancel](msg)
+		if err != nil {
+			panic(err)
+		}
+		return d.handleCancel(info.TransferId)
 	}
 	log.Panicf("Received unkonwn message: %v\n", msg)
 	return Message{}
@@ -122,7 +136,10 @@ func (d *Downloader) handleInfo(info TransferInfo) Message {
 		panic(err)
 	}
 
-	state := &TransferState{
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	state := &TransferResponse{
 		TransferId:     info.TransferId,
 		AmountReceived: 0,
 		file:           contents,
@@ -130,18 +147,20 @@ func (d *Downloader) handleInfo(info TransferInfo) Message {
 
 	d.States[info.TransferId] = state
 	d.Transfers[info.TransferId] = info
-
-	return NewMessage(TRANSFER_STATE, *state)
+	return NewMessage(TRANSFER_RESPONSE, *state)
 }
 
-func (d *Downloader) handleChunk(chunk FileChunk) Message {
+func (d *Downloader) handleChunk(chunk TransferChunk) Message {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
 	info := d.Transfers[chunk.TransferId]
 	state := d.States[chunk.TransferId]
 	chunkSize := int64(len(chunk.Data))
 
 	// already got this chunk, ignore
 	if state.AmountReceived >= chunk.Offset+chunkSize {
-		return NewMessage(TRANSFER_STATE, *state)
+		return NewMessage(TRANSFER_RESPONSE, *state)
 	}
 
 	if err := state.file.Lock(); err != nil {
@@ -159,6 +178,29 @@ func (d *Downloader) handleChunk(chunk FileChunk) Message {
 	if state.AmountReceived >= info.FileSize { // last chunk, done writing
 		state.file.Unmap()
 	}
+	return NewMessage(TRANSFER_RESPONSE, *state)
+}
 
-	return NewMessage(TRANSFER_STATE, *state)
+func (d *Downloader) handleCancel(transferId string) Message {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	// FIXME: why is this called twice???
+	file, exists := d.States[transferId]
+	log.Println(exists, file == nil, transferId)
+
+	if err := d.States[transferId].file.Unmap(); err != nil {
+		panic(err)
+	}
+
+	fullpath := path.Join(d.DownloadFolder, d.Transfers[transferId].FileName)
+	if err := os.Remove(fullpath); err != nil {
+		panic(err)
+	}
+
+	delete(d.States, transferId)
+	delete(d.Transfers, transferId)
+
+	state := TransferResponse{TransferId: transferId, Cancelled: true}
+	return NewMessage(TRANSFER_RESPONSE, state)
 }

@@ -1,12 +1,12 @@
 import { useContext, useEffect, useState, useRef } from "react";
 
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { StartFileTransfer, SendFileChunk } from "../wailsjs/go/main/App";
+import { StartFileTransfer, SendFileChunk, SendCancelSignal} from "../wailsjs/go/main/App";
 
 import { PeersContext } from "./StateProvider";
 import { TransferContext } from "./StateProvider";
 
-import { TRANSFER_STATE } from "./constants";
+import { TRANSFER_RESPONSE } from "./constants";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
@@ -35,6 +35,7 @@ function FileEntry({ name, progress, onClick, recipient }) {
   );
 }
 
+// FIXME: if we select file before peer, the button's diabled
 function FileAndPeerSelection({
   setSending, selectedPeers, setSelectedPeers,
   selectedFiles, setSelectedFiles
@@ -138,6 +139,7 @@ class Transfer {
     this.file = file;
 
     this.done = false;
+    this.cancelled = false;
     this.amountSent = 0;
     this.sentValue = undefined;
 
@@ -157,7 +159,6 @@ class Transfer {
     const end = Math.min(this.amountSent + chunkSize, this.file.size);
     const slice = this.file.slice(this.amountSent, end);
 
-    // ok, we're slicing properly...why are we failing to read the file chunk?
     const chunk = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(Array.from(new Uint8Array(reader.result)));
@@ -167,23 +168,25 @@ class Transfer {
     this.sentValue = chunk;
   }
 
-  async sendInfo() { // see downloader.go for object params
+  // See downloader.go for the object fields, and app.go for the exported functions
+  async sendInfo() {
     await StartFileTransfer({
       transferId: this.id, recipient: this.recipient,
       name: this.file.name, size: this.file.size
     });
   }
 
-  async sendChunk() { // see downloader.go for object params
-    try {
-      await SendFileChunk({
-        transferId: this.id, recipient: this.recipient,
-        offset: this.amountSent, data: this.sentValue,
-      });
-    } catch (e) {
-      console.log("wtf", e)
-    }
+  async sendChunk() {
+    await SendFileChunk({
+      transferId: this.id, recipient: this.recipient,
+      offset: this.amountSent, data: this.sentValue,
+    });
+  }
 
+  async sendCancel() {
+    this.cancelled = true;
+    console.log("sending cancel...");
+    await SendCancelSignal({ transferId: this.id, recipient: this.recipient });
   }
 }
 
@@ -210,17 +213,19 @@ export default function TransferPane() {
     }
   }
 
-  const sendChunk = async (transferId, advance) => {
+  const sendMessage = async (transferId, advance) => {
     const transfer = TRANSFERS[transferId];
 
-    // resend the file transfer info message
+    if (transfer.cancelled) {
+      await transfer.sendCancel();
+      return;
+    }
+
     if (advance == false && transfer.sentValue === undefined) {
-      console.log("resending transfer info");
       await transfer.sendInfo();
       return;
     }
 
-    // read the next file chunk
     if (advance) {
       await transfer.readChunk();
       if (transfer.done) return;
@@ -229,22 +234,23 @@ export default function TransferPane() {
     await transfer.sendChunk();
   }
 
-  const handleTransferState = async (response) => {
+  const handleTransferResponse = async (response) => {
     const json = JSON.parse(atob(response["data"]));
     const transferId = json["transferId"];
 
-    console.log("getting response: ", json["amountReceived"]);
+    if (json["cancelled"]) {
+      delete TRANSFERS[transferId];
+      return;
+    }
 
     TRANSFERS[transferId].lastResponseTime = Date.now();
     TRANSFERS[transferId].amountSent += json["amountReceived"];
 
-    await sendChunk(transferId, true);
+    await sendMessage(transferId, true);
     setTransferIds(prev => [...prev]); // force rerender
   }
 
-  // Resend a file chunk to peers who haven't responded in
-  // a while, assuming that in that case, they didn't get the chunk
-  const resendChunks = async () => {
+  const resendMessages = async () => {
     for (const id in TRANSFERS) {
       const transfer = TRANSFERS[id];
       if (transfer.done) continue;
@@ -257,32 +263,35 @@ export default function TransferPane() {
       if (transfer.numRetries >= transfer.maxRetries) {
         delete TRANSFERS[id];
         setTransferIds(prev => prev.filter(transferId => transferId != id));
-        console.log("max retries exceeded...giving up"); // TODO: tell the use this
+        console.log("max retries exceeded...giving up"); // TODO: tell the user this
       } else {
-        await sendChunk(id, false);
+        await sendMessage(id, false);
       }
     }
   }
 
-  const sendFiles = async () => {
-    if (selectedFiles.length == 0 || selectedPeers.length == 0) return;
-    await startTransfer();
-    setSelectedFiles([]);
-    setSelectedPeers([]);
-  };
-
   useEffect(() => {
-    const startSending = async () => await sendFiles();
-    if (sending) startSending();
-    // TODO: else, stop the file transfers
+    const toggleSending = async () => {
+      if (sending) {
+        await startTransfer();
+      } else {
+        for (const transferId in TRANSFERS) {
+          await TRANSFERS[transferId].sendCancel();
+        }
+      }
+      setSelectedFiles([]);
+      setSelectedPeers([]);
+    };
+
+    toggleSending();
   }, [sending]);
 
   // TODO: resuming transfers???
   useEffect(() => {
     const cancelListener =
-      EventsOn(TRANSFER_STATE, (data) => handleTransferState(data));
+      EventsOn(TRANSFER_RESPONSE, (data) => handleTransferResponse(data));
 
-    const intervalId = setInterval(async () => await resendChunks(), 10000);
+    const intervalId = setInterval(async () => await resendMessages(), 10000);
     return () => {
       cancelListener();
       clearInterval(intervalId);

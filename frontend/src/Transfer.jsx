@@ -10,6 +10,7 @@ import { TRANSFER_STATE } from "./constants";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
+// FIXME: the progress bar doesn't work
 function FileEntry({ name, progress, onClick, recipient }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
@@ -17,7 +18,7 @@ function FileEntry({ name, progress, onClick, recipient }) {
 
   useEffect(() => {
     if (progress !== undefined) {
-      const total = barElement.current.parentElement.offsetWidth - 2;
+      const total = barElement.current.offsetWidth;
       barElement.current.style.width = `${progress * total}px`;
       setFull(progress >= 1.0);
     }
@@ -134,34 +135,58 @@ class Transfer {
   constructor(file, id, recipient) {
     this.id = id;
     this.recipient = recipient;
+    this.file = file;
 
-    this.filename = file.name;
-    this.filesize = file.size;
-    this.fileReader = file.stream().getReader();
-
+    this.done = false;
     this.amountSent = 0;
     this.sentValue = undefined;
+
+    this.numRetries = 0;
+    this.maxRetries = 10;
     this.lastResponseTime = Date.now();
   }
 
+  async readChunk() {
+    // Send 256 kb chunks so that we stay below webrtc's message limit
+    const chunkSize = 256 * 1024;
+    if (this.amountSent + chunkSize >= this.file.size) {
+      this.done = true;
+      return;
+    }
+
+    const end = Math.min(this.amountSent + chunkSize, this.file.size);
+    const slice = this.file.slice(this.amountSent, end);
+
+    // ok, we're slicing properly...why are we failing to read the file chunk?
+    const chunk = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(Array.from(new Uint8Array(reader.result)));
+      reader.onerror = () => reject(new Error(reader.error)); // TODO: tell the user this
+      reader.readAsArrayBuffer(slice);
+    });
+    this.sentValue = chunk;
+  }
+
   async sendInfo() { // see downloader.go for object params
-    const info = {
+    await StartFileTransfer({
       transferId: this.id, recipient: this.recipient,
-      name: this.filename, size: this.filesize
-    };
-    await StartFileTransfer(info);
+      name: this.file.name, size: this.file.size
+    });
   }
 
   async sendChunk() { // see downloader.go for object params
-    const info = {
-      transferId: this.id, recipient: this.recipient,
-      data: this.sentValue, offset: this.amountSent
+    try {
+      await SendFileChunk({
+        transferId: this.id, recipient: this.recipient,
+        offset: this.amountSent, data: this.sentValue,
+      });
+    } catch (e) {
+      console.log("wtf", e)
     }
-    await SendFileChunk(info);
+
   }
 }
 
-// TODO: file transfering with large files falls apart
 let TRANSFERS = {}; // TODO: load and save this
 
 export default function TransferPane() {
@@ -175,8 +200,9 @@ export default function TransferPane() {
   const startTransfer = async () => {
     for (const file of selectedFiles) {
       for (const peer of selectedPeers) {
+        const clone = new File([file], file.name, { type: file.type });
         const transferId = `${file.name}-${Math.floor(Math.random() * 100)}`;
-        const transfer = new Transfer(file, transferId, peer);
+        const transfer = new Transfer(clone, transferId, peer);
         TRANSFERS[transferId] = transfer;
         setTransferIds(prev => [...prev, transferId]);
         await transfer.sendInfo();
@@ -187,25 +213,17 @@ export default function TransferPane() {
   const sendChunk = async (transferId, advance) => {
     const transfer = TRANSFERS[transferId];
 
-    // read the next file chunk
-    if (advance) {
-      const { value, done } = await transfer.fileReader.read();
-      if (done) {
-        transfer.done = true;
-        return;
-      }
-
-      console.log("sending chunk");
-      transfer.sentValue = Array.from(value);
-    } else {
-      console.log("resending chunk");
-    }
-
     // resend the file transfer info message
     if (advance == false && transfer.sentValue === undefined) {
       console.log("resending transfer info");
       await transfer.sendInfo();
       return;
+    }
+
+    // read the next file chunk
+    if (advance) {
+      await transfer.readChunk();
+      if (transfer.done) return;
     }
 
     await transfer.sendChunk();
@@ -215,11 +233,13 @@ export default function TransferPane() {
     const json = JSON.parse(atob(response["data"]));
     const transferId = json["transferId"];
 
+    console.log("getting response: ", json["amountReceived"]);
+
     TRANSFERS[transferId].lastResponseTime = Date.now();
     TRANSFERS[transferId].amountSent += json["amountReceived"];
 
-    setTransferIds(prev => [...prev]); // force rerender
     await sendChunk(transferId, true);
+    setTransferIds(prev => [...prev]); // force rerender
   }
 
   // Resend a file chunk to peers who haven't responded in
@@ -229,10 +249,18 @@ export default function TransferPane() {
       const transfer = TRANSFERS[id];
       if (transfer.done) continue;
 
-      const [now, timeoutSeconds] = [Date.now(), 10];
-      const elapsedSeconds = (now - transfer.lastResponseTime) / 1000;
-      if (elapsedSeconds >= timeoutSeconds)
+      const elapsedSeconds = (Date.now() - transfer.lastResponseTime) / 1000;
+      const needToRetry = elapsedSeconds >= 10;
+      if (!needToRetry) continue;
+
+      transfer.numRetries += 1;
+      if (transfer.numRetries >= transfer.maxRetries) {
+        delete TRANSFERS[id];
+        setTransferIds(prev => prev.filter(transferId => transferId != id));
+        console.log("max retries exceeded...giving up"); // TODO: tell the use this
+      } else {
         await sendChunk(id, false);
+      }
     }
   }
 
@@ -277,8 +305,9 @@ export default function TransferPane() {
           <div className="progress-container">
             {transferIds.map(id => {
               const t = TRANSFERS[id];
-              return <FileEntry key={id} name={t.filename}
-                        recipient={t.recipient} progress={t.amountSent / t.filesize} />;
+              if (t === undefined) return null;
+              return <FileEntry key={id} name={t.file.name}
+                        recipient={t.recipient} progress={t.amountSent / t.file.size} />;
             })}
           </div>
           <div className="error-tray">{/* TODO: error messages go here */}</div>

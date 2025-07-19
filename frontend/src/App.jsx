@@ -37,9 +37,9 @@ export default function App() {
       </div>
 
       <div className="content">
-        {activePane == Panes.Transfer && <TransferPane />}
-        {activePane == Panes.Received && <ReceivedFiles />}
-        {activePane == Panes.Settings && <Settings />}
+        {activePane === Panes.Transfer && <TransferPane />}
+        {activePane === Panes.Received && <ReceivedFiles />}
+        {activePane === Panes.Settings && <Settings />}
       </div>
     </div>
   );

@@ -1,16 +1,12 @@
 import { useContext, useEffect, useState, useRef } from "react";
-
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { StartFileTransfer, SendFileChunk, SendCancelSignal} from "../wailsjs/go/main/App";
 
-import { PeersContext } from "./StateProvider";
-import { TransferContext } from "./StateProvider";
-
+import { PeersContext, TransferContext } from "./StateProvider";
 import { TRANSFER_RESPONSE } from "./constants";
+import * as sender from "./sender";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
-// FIXME: the progress bar doesn't work
 function FileEntry({ name, progress, onClick, recipient }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
@@ -18,8 +14,7 @@ function FileEntry({ name, progress, onClick, recipient }) {
 
   useEffect(() => {
     if (progress !== undefined) {
-      const total = barElement.current.offsetWidth;
-      barElement.current.style.width = `${progress * total}px`;
+      barElement.current.style.width = `${Math.min(progress, 1.0) * 100}%`;
       setFull(progress >= 1.0);
     }
   }, [progress]);
@@ -48,7 +43,7 @@ function FileAndPeerSelection({
   useEffect(() => {
     setHavePeers(peers && peers.length > 0);
     setCanSend(selectedFiles.length > 0 && selectedPeers.length > 0);
-  }, [peers, selectedFiles]);
+  }, [peers, selectedFiles, selectedPeers]);
 
   const selectPeer = (event, name) => {
     setSelectedPeers((prev) => {
@@ -89,7 +84,7 @@ function FileAndPeerSelection({
     <div className="inner-content">
       <div className="upper-container">
         <h3> Send to </h3>
-        {havePeers ? (
+        {havePeers && peers ? (
           <div className="peers-container">
             {peers.map((name, index) => (
               <div className="peer-entry" key={index}>
@@ -132,66 +127,6 @@ function FileAndPeerSelection({
   );
 }
 
-class Transfer {
-  constructor(file, id, recipient) {
-    this.id = id;
-    this.recipient = recipient;
-    this.file = file;
-
-    this.done = false;
-    this.cancelled = false;
-    this.amountSent = 0;
-    this.sentValue = undefined;
-
-    this.numRetries = 0;
-    this.maxRetries = 10;
-    this.lastResponseTime = Date.now();
-  }
-
-  async readChunk() {
-    // Send 256 kb chunks so that we stay below webrtc's message limit
-    const chunkSize = 256 * 1024;
-    if (this.amountSent + chunkSize >= this.file.size) {
-      this.done = true;
-      return;
-    }
-
-    const end = Math.min(this.amountSent + chunkSize, this.file.size);
-    const slice = this.file.slice(this.amountSent, end);
-
-    const chunk = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(Array.from(new Uint8Array(reader.result)));
-      reader.onerror = () => reject(new Error(reader.error)); // TODO: tell the user this
-      reader.readAsArrayBuffer(slice);
-    });
-    this.sentValue = chunk;
-  }
-
-  // See downloader.go for the object fields, and app.go for the exported functions
-  async sendInfo() {
-    await StartFileTransfer({
-      transferId: this.id, recipient: this.recipient,
-      name: this.file.name, size: this.file.size
-    });
-  }
-
-  async sendChunk() {
-    await SendFileChunk({
-      transferId: this.id, recipient: this.recipient,
-      offset: this.amountSent, data: this.sentValue,
-    });
-  }
-
-  async sendCancel() {
-    this.cancelled = true;
-    console.log("sending cancel...");
-    await SendCancelSignal({ transferId: this.id, recipient: this.recipient });
-  }
-}
-
-let TRANSFERS = {}; // TODO: load and save this
-
 export default function TransferPane() {
   const {
     sending, setSending,
@@ -200,98 +135,32 @@ export default function TransferPane() {
     selectedFiles, setSelectedFiles
   } = useContext(TransferContext);
 
-  const startTransfer = async () => {
-    for (const file of selectedFiles) {
-      for (const peer of selectedPeers) {
-        const clone = new File([file], file.name, { type: file.type });
-        const transferId = `${file.name}-${Math.floor(Math.random() * 100)}`;
-        const transfer = new Transfer(clone, transferId, peer);
-        TRANSFERS[transferId] = transfer;
-        setTransferIds(prev => [...prev, transferId]);
-        await transfer.sendInfo();
-      }
-    }
-  }
-
-  const sendMessage = async (transferId, advance) => {
-    const transfer = TRANSFERS[transferId];
-
-    if (transfer.cancelled) {
-      await transfer.sendCancel();
-      return;
-    }
-
-    if (advance == false && transfer.sentValue === undefined) {
-      await transfer.sendInfo();
-      return;
-    }
-
-    if (advance) {
-      await transfer.readChunk();
-      if (transfer.done) return;
-    }
-
-    await transfer.sendChunk();
-  }
-
-  const handleTransferResponse = async (response) => {
-    const json = JSON.parse(atob(response["data"]));
-    const transferId = json["transferId"];
-
-    if (json["cancelled"]) {
-      delete TRANSFERS[transferId];
-      return;
-    }
-
-    TRANSFERS[transferId].lastResponseTime = Date.now();
-    TRANSFERS[transferId].amountSent += json["amountReceived"];
-
-    await sendMessage(transferId, true);
-    setTransferIds(prev => [...prev]); // force rerender
-  }
-
-  const resendMessages = async () => {
-    for (const id in TRANSFERS) {
-      const transfer = TRANSFERS[id];
-      if (transfer.done) continue;
-
-      const elapsedSeconds = (Date.now() - transfer.lastResponseTime) / 1000;
-      const needToRetry = elapsedSeconds >= 10;
-      if (!needToRetry) continue;
-
-      transfer.numRetries += 1;
-      if (transfer.numRetries >= transfer.maxRetries) {
-        delete TRANSFERS[id];
-        setTransferIds(prev => prev.filter(transferId => transferId != id));
-        console.log("max retries exceeded...giving up"); // TODO: tell the user this
-      } else {
-        await sendMessage(id, false);
-      }
-    }
-  }
+  const [done, setDone] = useState(false);
+  const [cancel, setCancel] = useState(false);
 
   useEffect(() => {
-    const toggleSending = async () => {
-      if (sending) {
-        await startTransfer();
-      } else {
-        for (const transferId in TRANSFERS) {
-          await TRANSFERS[transferId].sendCancel();
-        }
-      }
-      setSelectedFiles([]);
-      setSelectedPeers([]);
-    };
-
-    toggleSending();
+    if (sending)
+      sender.startTransfer(selectedFiles, selectedPeers, setTransferIds);
+    setSelectedFiles([]);
+    setSelectedPeers([]);
   }, [sending]);
+
+  useEffect(() => {
+    if (cancel) {
+      sender.cancelTransfers();
+      setSending(false);
+      setDone(false);
+      setCancel(false);
+    }
+  }, [cancel]);
 
   // TODO: resuming transfers???
   useEffect(() => {
-    const cancelListener =
-      EventsOn(TRANSFER_RESPONSE, (data) => handleTransferResponse(data));
+    const cancelListener = EventsOn(TRANSFER_RESPONSE,
+      (data) => sender.handleResponse(data, setTransferIds, setDone));
 
-    const intervalId = setInterval(async () => await resendMessages(), 10000);
+    const intervalId = setInterval(async () =>
+      await sender.resendMessages(setTransferIds, setDone), 10000);
     return () => {
       cancelListener();
       clearInterval(intervalId);
@@ -308,12 +177,15 @@ export default function TransferPane() {
       {sending &&
         <div className="inner-content">
           <div className="status-top-row">
-            <button onClick={() => setSending(false)}> Cancel </button>
-            <h1> Sending </h1>
+            <button onClick={() => done ? setSending(false) : setCancel(true)}>
+              {done ? "Back" : "Cancel"}
+            </button>
+            <h1> {done ? "Done sending!" : "Sending..."} </h1>
           </div>
+
           <div className="progress-container">
             {transferIds.map(id => {
-              const t = TRANSFERS[id];
+              const t = sender.TRANSFERS[id];
               if (t === undefined) return null;
               return <FileEntry key={id} name={t.file.name}
                         recipient={t.recipient} progress={t.amountSent / t.file.size} />;

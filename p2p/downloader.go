@@ -154,8 +154,13 @@ func (d *Downloader) handleChunk(chunk TransferChunk) Message {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 
+	state, exists := d.States[chunk.TransferId]
+	if !exists { // must have been deleted
+		t := TransferResponse{TransferId: chunk.TransferId, Cancelled: true}
+		return NewMessage(TRANSFER_RESPONSE, t)
+	}
+
 	info := d.Transfers[chunk.TransferId]
-	state := d.States[chunk.TransferId]
 	chunkSize := int64(len(chunk.Data))
 
 	// already got this chunk, ignore
@@ -184,10 +189,6 @@ func (d *Downloader) handleChunk(chunk TransferChunk) Message {
 func (d *Downloader) handleCancel(transferId string) Message {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
-
-	// FIXME: why is this called twice???
-	file, exists := d.States[transferId]
-	log.Println(exists, file == nil, transferId)
 
 	if err := d.States[transferId].file.Unmap(); err != nil {
 		panic(err)

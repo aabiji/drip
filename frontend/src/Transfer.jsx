@@ -127,6 +127,7 @@ function FileAndPeerSelection({
   );
 }
 
+// TODO: when we're on the receving end, the ui should reflect that.... (see TransferRequest)
 export default function TransferPane() {
   const {
     sending, setSending,

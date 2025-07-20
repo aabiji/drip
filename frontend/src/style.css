@@ -496,31 +496,45 @@ dialog::backdrop {
 
 /* Error tray and messages */
 .error-tray {
+  width: 50%;
   height: fit-content;
-  flex-grow: 0;
-  margin-top: auto;
+  position: fixed;
+  bottom: 10px;
+  left: 50%;
+  transform: translateX(-50%);
 }
 
 .error-message {
+  width: 100%;
+  position: relative;
   background-color: var(--red-400);
   border: 2px solid var(--red-500);
   color: var(--red-600);
   border-radius: 4px;
-  margin-bottom: 8px;
-  padding: 0px 10px;
+  padding: 0 10px;
   display: flex;
   flex-direction: row;
   justify-content: space-between;
+  box-sizing: border-box;
+  margin-bottom: 10px;
+  transition: transform 100ms ease, opacity 100ms ease, scale 100ms ease;
+  opacity: 1;
+  transform: scale(1);
 }
 
-.retry-button {
+.error-message.removing {
+  opacity: 0;
+  transform: scale(0.9);
+}
+
+.error-button {
   background-color: rgba(0, 0, 0, 0);
   border: none;
   outline: none;
   cursor: pointer;
 }
 
-.retry-icon {
+.error-icon {
   width: 22px;
   height: 22px;
   fill: var(--red-600);

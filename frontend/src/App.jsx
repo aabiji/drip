@@ -1,5 +1,6 @@
 import { useState } from "react";
 
+import ErrorTray from "./Error";
 import TransferPane from "./Transfer";
 import ReceivedFiles from "./Files";
 import Settings from "./Settings";
@@ -41,6 +42,8 @@ export default function App() {
         {activePane === Panes.Received && <ReceivedFiles />}
         {activePane === Panes.Settings && <Settings />}
       </div>
+
+      <ErrorTray />
     </div>
   );
 }

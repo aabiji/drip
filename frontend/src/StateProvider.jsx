@@ -4,6 +4,7 @@ import { GetPeers } from "../wailsjs/go/main/App";
 import { PEERS_UPDATED } from "./constants";
 
 export const PeersContext = createContext([]);
+export const ErrorContext = createContext([]);
 export const ThemeContext = createContext("light");
 export const TransferContext = createContext(null);
 
@@ -27,19 +28,29 @@ export default function StateProvider({ children }) {
   const [transferIds, setTransferIds] = useState([]);
   const [sending, setSending] = useState(false);
 
+  const [errors, setErrors] = useState([]);
+
+  const addError = (message) =>
+    setErrors(prev => [...prev, { id: crypto.randomUUID(), message }]);
+
+  const removeError = (id) =>
+    setErrors(prev => prev.filter(error => error.id !== id));
+
   return (
     <ThemeContext.Provider value={{ theme, setTheme }}>
-      <PeersContext.Provider value={peers}>
-        <TransferContext.Provider
-          value={{
-            sending, setSending,
-            transferIds, setTransferIds,
-            selectedPeers, setSelectedPeers,
-            selectedFiles, setSelectedFiles
-          }}>
-            {children}
-        </TransferContext.Provider>
-      </PeersContext.Provider>
+      <ErrorContext.Provider value={{ errors, addError, removeError }}>
+        <PeersContext.Provider value={peers}>
+          <TransferContext.Provider
+            value={{
+              sending, setSending,
+              transferIds, setTransferIds,
+              selectedPeers, setSelectedPeers,
+              selectedFiles, setSelectedFiles
+            }}>
+              {children}
+          </TransferContext.Provider>
+        </PeersContext.Provider>
+      </ErrorContext.Provider>
     </ThemeContext.Provider>
   );
 }

@@ -10,11 +10,15 @@ import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 function FileEntry({ name, progress, onClick, recipient, error }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
-  const msg = recipient !== undefined ? `Sending ${name} to ${recipient}` : name;
+  const [msg, setMsg] = useState(
+    recipient !== undefined ? `Sending ${name} to ${recipient}` : name
+  );
 
   useEffect(() => {
-    if (error) {
+    if (error && recipient !== undefined) {
       progress = undefined;
+      barElement.current.style.width = "0px";
+      setMsg(`Failed to send ${name} to ${recipient}`);
       return;
     }
 
@@ -140,7 +144,6 @@ export default function TransferPane() {
     selectedFiles, setSelectedFiles
   } = useContext(TransferContext);
 
-  const [done, setDone] = useState(false);
   const [cancel, setCancel] = useState(false);
 
   const { addError } = useContext(ErrorContext);
@@ -162,7 +165,6 @@ export default function TransferPane() {
       if (cancel) {
         await sender.cancelTransfers();
         setSending(false);
-        setDone(false);
         setCancel(false);
       }
     });
@@ -171,10 +173,10 @@ export default function TransferPane() {
   // TODO: resuming transfers???
   useEffect(() => {
     const cancelListener = EventsOn(TRANSFER_RESPONSE,
-      (data) => errorHandler(async () => await sender.handleResponse(data, setTransferIds, setDone)));
+      (data) => errorHandler(async () => await sender.handleResponse(data, setTransferIds)));
 
     const intervalId = setInterval(() =>
-      errorHandler(async () => await sender.resendMessages(setTransferIds, setDone)),
+      errorHandler(async () => await sender.resendMessages(setTransferIds)),
     10000);
     return () => {
       cancelListener();
@@ -191,12 +193,18 @@ export default function TransferPane() {
           selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
       {sending &&
         <div className="inner-content">
-          <div className="status-top-row">
-            <button onClick={() => done ? setSending(false) : setCancel(true)}>
-              {done ? "Back" : "Cancel"}
-            </button>
-            <h1> {done ? "Done sending!" : "Sending..."} </h1>
-          </div>
+          {(() => {
+            const done = Object.values(sender.TRANSFERS).every(transfer => transfer.done);
+            const failed = Object.values(sender.TRANSFERS).every(transfer => transfer.hadError);
+            return (
+              <div className="status-top-row">
+                <button onClick={() => done ? setSending(false) : setCancel(true)}>
+                  {done || failed ? "Back" : "Cancel"}
+                </button>
+                <h1> {done ? "Done sending!" : failed ? "Sending failed" : "Sending"} </h1>
+              </div>
+            );
+          })()}
 
           <div className="progress-container">
             {transferIds.map(id => {

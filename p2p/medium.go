@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"log"
 	"net"
@@ -80,15 +81,29 @@ type Medium interface {
 
 type TCPMedium struct {
 	packets  chan Message
+	closed   bool
 	peerAddr string
 	ourAddr  string
 }
 
-func (t *TCPMedium) QueueMessage(msg Message) { t.packets <- msg }
+func NewTCPMedium(ourAddr string, peerAddr string) *TCPMedium {
+	return &TCPMedium{
+		packets:  make(chan Message, 25),
+		closed:   false,
+		peerAddr: peerAddr,
+		ourAddr:  ourAddr,
+	}
+}
 
-// placeholders
-func (t *TCPMedium) Connected() bool { return false }
-func (t *TCPMedium) Close()          {}
+func (t *TCPMedium) QueueMessage(msg Message) { t.packets <- msg }
+func (t *TCPMedium) Connected() bool          { return false } // placeholder
+
+func (t *TCPMedium) Close() {
+	if !t.closed {
+		close(t.packets)
+		t.closed = true
+	}
+}
 
 func sendTCPMessage(conn net.Conn, msg Message) error {
 	data := msg.Serialize()
@@ -126,7 +141,7 @@ dialoop:
 	for {
 		select {
 		case <-ctx.Done():
-			close(t.packets)
+			t.Close()
 			return // quit
 		default:
 			conn, err = net.Dial("tcp", t.peerAddr)
@@ -142,7 +157,7 @@ dialoop:
 	for {
 		select {
 		case <-ctx.Done():
-			close(t.packets)
+			t.Close()
 			return // quit
 		case pkt, ok := <-t.packets:
 			if !ok {
@@ -164,30 +179,42 @@ func (t *TCPMedium) ReceiveMessages(ctx context.Context, handler func(msg Messag
 	defer listener.Close()
 
 	for {
-		conn, err := listener.Accept()
-		if err != nil {
-			panic(err)
-		}
-
-		go func(c net.Conn) {
-			defer c.Close()
-			for {
-				select {
-				case <-ctx.Done():
-					close(t.packets)
-					return // quit
-				default:
-					data, err := readFramedMessage(conn)
-					if err == io.EOF {
-						return // Couldn't read this message in full, so ignore
-					} else if err != nil {
-						panic(err)
-					}
-					msg := Deserialize(data)
-					handler(msg)
-				}
+		// Create a channel to receive accepted connections
+		connCh := make(chan net.Conn)
+		go func() {
+			conn, err := listener.Accept()
+			if errors.Is(err, net.ErrClosed) {
+				return // listneer was closed already
+			} else if err != nil {
+				panic(err)
 			}
-		}(conn)
+			connCh <- conn
+		}()
+
+		select {
+		case <-ctx.Done():
+			return
+		case conn := <-connCh:
+			go func(c net.Conn) {
+				defer c.Close()
+				for {
+					select {
+					case <-ctx.Done():
+						t.Close()
+						return
+					default:
+						data, err := readFramedMessage(c)
+						if err == io.EOF {
+							return
+						} else if err != nil {
+							panic(err)
+						}
+						msg := Deserialize(data)
+						handler(msg)
+					}
+				}
+			}(conn)
+		}
 	}
 }
 

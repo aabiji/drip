@@ -21,7 +21,7 @@ export class Transfer {
   async readChunk() {
     // Send 256 kb chunks so that we stay below webrtc's message limit
     const chunkSize = 256 * 1024;
-    if (this.amountSent + chunkSize >= this.file.size) {
+    if (this.amountSent >= this.file.size) {
       this.done = true;
       return;
     }
@@ -99,12 +99,14 @@ export async function startTransfer(selectedFiles, selectedPeers, setTransferIds
 }
 
 export async function cancelTransfers() {
-  for (const transferId in TRANSFERS) {
-    await TRANSFERS[transferId].sendCancel();
+  for (const id in TRANSFERS) {
+    if (TRANSFERS[id].hadError || TRANSFERS[id].cancelled)
+      continue;
+    await TRANSFERS[id].sendCancel();
   }
 }
 
-export async function handleResponse(response, setTransferIds, setDoneSending) {
+export async function handleResponse(response, setTransferIds) {
   const json = JSON.parse(atob(response["data"]));
   const transferId = json["transferId"];
 
@@ -116,11 +118,11 @@ export async function handleResponse(response, setTransferIds, setDoneSending) {
   TRANSFERS[transferId].lastResponseTime = Date.now();
   TRANSFERS[transferId].amountSent += json["amountReceived"];
 
-  await sendMessage(transferId, true, setDoneSending);
+  await sendMessage(transferId, true);
   setTransferIds(prev => [...prev]); // force rerender
 }
 
-export async function sendMessage(transferId, advance, setDoneSending) {
+export async function sendMessage(transferId, advance) {
   const transfer = TRANSFERS[transferId];
 
   if (transfer.cancelled) {
@@ -135,14 +137,13 @@ export async function sendMessage(transferId, advance, setDoneSending) {
 
   if (advance) {
     await transfer.readChunk();
-    setDoneSending(Object.values(TRANSFERS).every(transfer => transfer.done));
     if (transfer.done) return;
   }
 
   await transfer.sendChunk();
 }
 
-export async function resendMessages(setTransferIds, setDoneSending) {
+export async function resendMessages(setTransferIds) {
   for (const id in TRANSFERS) {
     const transfer = TRANSFERS[id];
     if (transfer.done || transfer.hadError) continue;
@@ -157,7 +158,7 @@ export async function resendMessages(setTransferIds, setDoneSending) {
       setTransferIds(prev => prev.filter(transferId => transferId != id));
       throw new Error(`Max retries for ${id} exceeded, cancelling transfer.`);
     } else {
-      await sendMessage(id, false, setDoneSending);
+      await sendMessage(id, false);
     }
   }
 }

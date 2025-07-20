@@ -25,7 +25,7 @@ func NewApp() *App {
 		panic(err)
 	}
 	events := make(chan p2p.Message, 25)
-	finder := p2p.NewPeerFinder(true, events, downloader)
+	finder := p2p.NewPeerFinder(true, events)
 
 	return &App{
 		events:       events,
@@ -63,7 +63,7 @@ func (a *App) startup(ctx context.Context) {
 
 	// launch the peer finder service
 	go func() {
-		if err := a.finder.Run(a.ctx); err != nil {
+		if err := a.finder.Run(a.ctx, a.downloader); err != nil {
 			panic(err)
 		}
 	}()
@@ -95,11 +95,14 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 
+func (a *App) stillConnected(peerId string) bool {
+	peer, exists := a.finder.Peers[peerId]
+	return exists && peer.Connected()
+}
+
 // the following functions are exported to the frontend
 func (a *App) StartFileTransfer(info p2p.TransferInfo) error {
-	// FIXME: do we even need this???
-	_, exists := a.finder.Peers[info.Recipient]
-	if !exists {
+	if !a.stillConnected(info.Recipient) {
 		return fmt.Errorf("%s has disconnected", info.Recipient)
 	}
 
@@ -109,8 +112,7 @@ func (a *App) StartFileTransfer(info p2p.TransferInfo) error {
 }
 
 func (a *App) SendFileChunk(chunk p2p.TransferChunk) error {
-	_, exists := a.finder.Peers[chunk.Recipient]
-	if !exists {
+	if !a.stillConnected(chunk.Recipient) {
 		return fmt.Errorf("%s has disconnected", chunk.Recipient)
 	}
 
@@ -120,8 +122,7 @@ func (a *App) SendFileChunk(chunk p2p.TransferChunk) error {
 }
 
 func (a *App) SendCancelSignal(signal p2p.TransferCancel) error {
-	_, exists := a.finder.Peers[signal.Recipient]
-	if !exists {
+	if !a.stillConnected(signal.Recipient) {
 		return fmt.Errorf("%s has disconnected", signal.Recipient)
 	}
 

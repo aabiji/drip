@@ -20,37 +20,52 @@ type Peer struct {
 	Webrtc    Medium
 	tcpMedium Medium
 
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	connection *webrtc.PeerConnection
 	downloader *Downloader
 	appEvents  chan Message
 }
 
-func NewPeer(
-	ip net.IP, id string, port int, devicePort int,
-	downloader *Downloader, appEvents chan Message) *Peer {
-	ourAddr := fmt.Sprintf(":%d", devicePort)
-	peerAddr := fmt.Sprintf("%s:%d", ip.String(), port)
-	packets := make(chan Message, 25)
+type peerInfo struct {
+	ip         net.IP
+	id         string
+	port       int
+	devicePort int
+	downloader *Downloader
+	appEvents  chan Message
+	parentCtx  context.Context
+}
+
+func NewPeer(info peerInfo) *Peer {
+	ourAddr := fmt.Sprintf(":%d", info.devicePort)
+	peerAddr := fmt.Sprintf("%s:%d", info.ip.String(), info.port)
+	ctx, cancel := context.WithCancel(info.parentCtx)
 
 	// This will be used for perfect negotiation. Being polite will
 	// mean we forego our own offer when we receive an offer from a peer.
 	// Being impolite will mean we ignore the peer's offer and continue with
 	// our own. This way, we avoid collisions by knowing that only one peer
 	// is able to initiate a connection
-	polite := id < getDeviceName()
+	polite := info.id < getDeviceName()
 
 	return &Peer{
-		Id:            id,
-		polite:        polite,
+		Id:            info.id,
 		LastHeardFrom: time.Now(),
-		downloader:    downloader,
-		tcpMedium:     &TCPMedium{packets, peerAddr, ourAddr},
-		appEvents:     appEvents,
+		makingOffer:   false,
+		polite:        polite,
+		tcpMedium:     NewTCPMedium(ourAddr, peerAddr),
+		ctx:           ctx,
+		cancel:        cancel,
+		downloader:    info.downloader,
+		appEvents:     info.appEvents,
 	}
 }
 
 // Will also call the dataChannel's OnClose
 func (p *Peer) Close() {
+	p.cancel()
 	if p.connection != nil {
 		p.connection.Close()
 		p.connection = nil
@@ -110,7 +125,7 @@ func (p *Peer) CreateConnection() {
 	})
 }
 
-func (p *Peer) SetupDataChannels(ctx context.Context) {
+func (p *Peer) SetupDataChannels() {
 	handler := func(msg Message) {
 		// Forward transfer replies to the frontend
 		if msg.MessageType == TRANSFER_RESPONSE {
@@ -122,15 +137,15 @@ func (p *Peer) SetupDataChannels(ctx context.Context) {
 		p.Webrtc.QueueMessage(reply)
 	}
 
-	go func() { p.tcpMedium.ForwardMessages(ctx) }()
-	go func() { p.tcpMedium.ReceiveMessages(ctx, p.handlePeerMessage) }()
+	go func() { p.tcpMedium.ForwardMessages(p.ctx) }()
+	go func() { p.tcpMedium.ReceiveMessages(p.ctx, p.handlePeerMessage) }()
 
 	if p.polite {
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 			log.Println("Accepting a data channel -- responder")
 			p.Webrtc = NewWebRTCMedium(dataChannel)
-			p.Webrtc.ForwardMessages(ctx)
-			p.Webrtc.ReceiveMessages(ctx, handler)
+			p.Webrtc.ForwardMessages(p.ctx)
+			p.Webrtc.ReceiveMessages(p.ctx, handler)
 		})
 	} else {
 		log.Println("Creating a data channel -- initiator")
@@ -139,8 +154,8 @@ func (p *Peer) SetupDataChannels(ctx context.Context) {
 			panic(err)
 		}
 		p.Webrtc = NewWebRTCMedium(dataChannel)
-		p.Webrtc.ForwardMessages(ctx)
-		p.Webrtc.ReceiveMessages(ctx, handler)
+		p.Webrtc.ForwardMessages(p.ctx)
+		p.Webrtc.ReceiveMessages(p.ctx, handler)
 	}
 }
 

@@ -1,26 +1,31 @@
 import { useContext, useEffect, useState, useRef } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
-import { PeersContext, TransferContext } from "./StateProvider";
+import { ErrorContext, PeersContext, TransferContext } from "./StateProvider";
 import { TRANSFER_RESPONSE } from "./constants";
 import * as sender from "./sender";
 
 import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
-function FileEntry({ name, progress, onClick, recipient }) {
+function FileEntry({ name, progress, onClick, recipient, error }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
   const msg = recipient !== undefined ? `Sending ${name} to ${recipient}` : name;
 
   useEffect(() => {
+    if (error) {
+      progress = undefined;
+      return;
+    }
+
     if (progress !== undefined) {
       barElement.current.style.width = `${Math.min(progress, 1.0) * 100}%`;
       setFull(progress >= 1.0);
     }
-  }, [progress]);
+  }, [progress, error]);
 
   return (
-    <div className={!full ? "file-entry" : "file-entry full"}>
+    <div className={full ? "file-entry full" : error ? "file-entry error" : "file-entry"}>
       <div className="inner">
         <p>{msg}</p>
         {onClick !== undefined && <button onClick={onClick}>x</button>}
@@ -30,7 +35,6 @@ function FileEntry({ name, progress, onClick, recipient }) {
   );
 }
 
-// FIXME: if we select file before peer, the button's diabled
 function FileAndPeerSelection({
   setSending, selectedPeers, setSelectedPeers,
   selectedFiles, setSelectedFiles
@@ -127,7 +131,7 @@ function FileAndPeerSelection({
   );
 }
 
-// TODO: when we're on the receving end, the ui should reflect that.... (see TransferRequest)
+// TODO: handle the edge case where the peer disconnects during transferring...
 export default function TransferPane() {
   const {
     sending, setSending,
@@ -139,29 +143,39 @@ export default function TransferPane() {
   const [done, setDone] = useState(false);
   const [cancel, setCancel] = useState(false);
 
+  const { addError } = useContext(ErrorContext);
+  const errorHandler = async (func) => {
+    try {await func(); } catch (error) { addError(error.toString()); }
+  }
+
   useEffect(() => {
-    if (sending)
-      sender.startTransfer(selectedFiles, selectedPeers, setTransferIds);
-    setSelectedFiles([]);
-    setSelectedPeers([]);
+    errorHandler(async () => {
+      if (sending)
+        sender.startTransfer(selectedFiles, selectedPeers, setTransferIds);
+      setSelectedFiles([]);
+      setSelectedPeers([]);
+    });
   }, [sending]);
 
   useEffect(() => {
-    if (cancel) {
-      sender.cancelTransfers();
-      setSending(false);
-      setDone(false);
-      setCancel(false);
-    }
+    errorHandler(async () => {
+      if (cancel) {
+        await sender.cancelTransfers();
+        setSending(false);
+        setDone(false);
+        setCancel(false);
+      }
+    });
   }, [cancel]);
 
   // TODO: resuming transfers???
   useEffect(() => {
     const cancelListener = EventsOn(TRANSFER_RESPONSE,
-      (data) => sender.handleResponse(data, setTransferIds, setDone));
+      (data) => errorHandler(async () => await sender.handleResponse(data, setTransferIds, setDone)));
 
-    const intervalId = setInterval(async () =>
-      await sender.resendMessages(setTransferIds, setDone), 10000);
+    const intervalId = setInterval(() =>
+      errorHandler(async () => await sender.resendMessages(setTransferIds, setDone)),
+    10000);
     return () => {
       cancelListener();
       clearInterval(intervalId);
@@ -188,11 +202,10 @@ export default function TransferPane() {
             {transferIds.map(id => {
               const t = sender.TRANSFERS[id];
               if (t === undefined) return null;
-              return <FileEntry key={id} name={t.file.name}
+              return <FileEntry key={id} name={t.file.name} error={t.hadError}
                         recipient={t.recipient} progress={t.amountSent / t.file.size} />;
             })}
           </div>
-          <div className="error-tray">{/* TODO: error messages go here */}</div>
         </div>
       }
     </div>

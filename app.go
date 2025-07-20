@@ -96,17 +96,36 @@ func (a *App) shutdown(ctx context.Context) {
 func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 
 // the following functions are exported to the frontend
-func (a *App) StartFileTransfer(info p2p.TransferInfo) {
+func (a *App) StartFileTransfer(info p2p.TransferInfo) error {
+	// FIXME: do we even need this???
+	_, exists := a.finder.Peers[info.Recipient]
+	if !exists {
+		return fmt.Errorf("%s has disconnected", info.Recipient)
+	}
+
 	msg := p2p.NewMessage(p2p.TRANSFER_INFO, info)
 	a.finder.Peers[info.Recipient].Webrtc.QueueMessage(msg)
+	return nil
 }
 
-func (a *App) SendFileChunk(chunk p2p.TransferChunk) {
+func (a *App) SendFileChunk(chunk p2p.TransferChunk) error {
+	_, exists := a.finder.Peers[chunk.Recipient]
+	if !exists {
+		return fmt.Errorf("%s has disconnected", chunk.Recipient)
+	}
+
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
 	a.finder.Peers[chunk.Recipient].Webrtc.QueueMessage(msg)
+	return nil
 }
 
-func (a *App) SendCancelSignal(signal p2p.TransferCancel) {
+func (a *App) SendCancelSignal(signal p2p.TransferCancel) error {
+	_, exists := a.finder.Peers[signal.Recipient]
+	if !exists {
+		return fmt.Errorf("%s has disconnected", signal.Recipient)
+	}
+
 	msg := p2p.NewMessage(p2p.TRANSFER_CANCEL, signal)
 	a.finder.Peers[signal.Recipient].Webrtc.QueueMessage(msg)
+	return nil
 }

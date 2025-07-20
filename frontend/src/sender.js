@@ -8,6 +8,8 @@ export class Transfer {
 
     this.done = false;
     this.cancelled = false;
+    this.hadError = false;
+
     this.amountSent = 0;
     this.sentValue = undefined;
 
@@ -30,7 +32,10 @@ export class Transfer {
     const chunk = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(Array.from(new Uint8Array(reader.result)));
-      reader.onerror = () => reject(new Error(reader.error)); // TODO: tell the user this
+      reader.onerror = () => {
+        this.hadError = true;
+        reject(new Error(`Couldn't read ${this.id}`));
+      }
       reader.readAsArrayBuffer(slice);
     });
     this.sentValue = chunk;
@@ -38,23 +43,37 @@ export class Transfer {
 
   // See downloader.go for the object fields, and app.go for the exported functions
   async sendInfo() {
-    await StartFileTransfer({
-      transferId: this.id, recipient: this.recipient,
-      name: this.file.name, size: this.file.size
-    });
+    try {
+      await StartFileTransfer({
+        transferId: this.id, recipient: this.recipient,
+        name: this.file.name, size: this.file.size
+      });
+    } catch (error) {
+      this.hadError = true;
+      throw new Error(`Failed to start transferring ${this.id}`);
+    }
   }
 
   async sendChunk() {
-    await SendFileChunk({
-      transferId: this.id, recipient: this.recipient,
-      offset: this.amountSent, data: this.sentValue,
-    });
+    try {
+      await SendFileChunk({
+        transferId: this.id, recipient: this.recipient,
+        offset: this.amountSent, data: this.sentValue,
+      });
+    } catch (error) {
+      this.hadError = true;
+      throw new Error(`Failed to send chunk for ${this.id}`);
+    }
   }
 
   async sendCancel() {
-    this.cancelled = true;
-    console.log("sending cancel...");
-    await SendCancelSignal({ transferId: this.id, recipient: this.recipient });
+    try {
+      await SendCancelSignal({ transferId: this.id, recipient: this.recipient });
+      this.cancelled = true;
+    } catch (error) {
+      this.hadError = true;
+      throw new Error(`Failed to cancel transferring ${this.id}`);
+    }
   }
 }
 
@@ -126,7 +145,7 @@ export async function sendMessage(transferId, advance, setDoneSending) {
 export async function resendMessages(setTransferIds, setDoneSending) {
   for (const id in TRANSFERS) {
     const transfer = TRANSFERS[id];
-    if (transfer.done) continue;
+    if (transfer.done || transfer.hadError) continue;
 
     const elapsedSeconds = (Date.now() - transfer.lastResponseTime) / 1000;
     const needToRetry = elapsedSeconds >= 10;
@@ -136,7 +155,7 @@ export async function resendMessages(setTransferIds, setDoneSending) {
     if (transfer.numRetries >= transfer.maxRetries) {
       delete TRANSFERS[id];
       setTransferIds(prev => prev.filter(transferId => transferId != id));
-      console.log("max retries exceeded...giving up"); // TODO: tell the user this
+      throw new Error(`Max retries for ${id} exceeded, cancelling transfer.`);
     } else {
       await sendMessage(id, false, setDoneSending);
     }

@@ -13,25 +13,19 @@ type App struct {
 	ctx    context.Context
 	events chan p2p.Message
 
-	finder       *p2p.PeerFinder
-	downloader   *p2p.Downloader
-	settingsPath string
+	finder     *p2p.PeerFinder
+	downloader *p2p.Downloader
 }
 
 func NewApp() *App {
-	settingsPath := "drip-state.json"
-	downloader, err := p2p.NewDownloader(settingsPath)
-	if err != nil {
-		panic(err)
-	}
+	downloader := p2p.NewDownloader()
 	events := make(chan p2p.Message, 25)
 	finder := p2p.NewPeerFinder(true, events)
 
 	return &App{
-		events:       events,
-		downloader:   downloader,
-		finder:       &finder,
-		settingsPath: settingsPath,
+		events:     events,
+		downloader: downloader,
+		finder:     &finder,
 	}
 }
 
@@ -83,7 +77,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	err := a.downloader.Close(a.settingsPath)
+	err := a.downloader.Close()
 	if err != nil {
 		panic(err)
 	}

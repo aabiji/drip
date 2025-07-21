@@ -1,48 +1,52 @@
 import { useState } from "react";
 
 import ErrorTray from "./Error";
-import TransferPane from "./Transfer";
-import ReceivedFiles from "./Files";
-import Settings from "./Settings";
+import TransferView from "./Transfer";
+import SettingsView from "./Settings";
 
 import { ReactComponent as SettingsIcon } from "./assets/settings.svg";
+import { ReactComponent as BackIcon } from "./assets/back.svg";
 
-const Panes = { Transfer: 0, Received: 1, Settings: 2 };
+const Views = { Transfer: 0, Authorize: 1, Received: 2, Settings: 3 };
 
 export default function App() {
-  const [activePane, setActivePane] = useState(Panes.Transfer);
+  const [view, setView] = useState(Views.Settings);
 
   return (
     <div className="app-wrapper">
-      <div className="navbar">
-        <div className="panes">
-          <button
-            onClick={() => setActivePane(Panes.Transfer)}
-            className={activePane == Panes.Transfer ? "active" : ""}
-          >
-            Transfer
-          </button>
-
-          <button
-            onClick={() => setActivePane(Panes.Received)}
-            className={activePane == Panes.Received ? "active" : ""}
-          >
-            Received
-          </button>
-        </div>
-
-        <button onClick={() => setActivePane(Panes.Settings)}>
-          <SettingsIcon
-            className={activePane == Panes.Settings ? "settings-active-icon" : "settings-icon"} />
+      {view == Views.Transfer &&
+        <button onClick={() => setView(Views.Settings)} className="settings-button">
+          <SettingsIcon className="settings-icon" />
         </button>
-      </div>
+      }
 
-      <div className="content">
-        {activePane === Panes.Transfer && <TransferPane />}
-        {activePane === Panes.Received && <ReceivedFiles />}
-        {activePane === Panes.Settings && <Settings />}
-      </div>
+      {view == Views.Settings &&
+        <button onClick={() => setView(Views.Transfer)} className="back-button">
+          <BackIcon class="settings-icon" />
+        </button>
+      }
 
+      {view == Views.Authorize &&
+        <div className="content">
+          <h2>So and so wants to send you some files</h2>
+          <div className="options">
+            <button className="accept">Accept</button>
+            <button className="decline">Reject</button>
+          </div>
+        </div>
+      }
+
+      {view == Views.Received &&
+        <div className="content">
+          <h2>Received 10 files</h2>
+          <div className="options">
+            <button className="ok">Open</button>
+          </div>
+        </div>
+      }
+
+      {view == Views.Transfer && <TransferView />}
+      {view == Views.Settings && <SettingsView />}
       <ErrorTray />
     </div>
   );

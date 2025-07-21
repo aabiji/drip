@@ -2,7 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 
 import App from "./App";
-import StateProvider from "./StateProvider";
+import State from "./State";
 
 import "./style.css";
 
@@ -12,8 +12,8 @@ const root = createRoot(container);
 
 root.render(
   <React.StrictMode>
-    <StateProvider>
+    <State>
       <App />
-    </StateProvider>
+    </State>
   </React.StrictMode>,
 );

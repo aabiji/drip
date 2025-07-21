@@ -1,6 +1,6 @@
 import { useState, useContext } from "react";
 import { ReactComponent as CloseIcon } from "./assets/close.svg";
-import { ErrorContext } from "./StateProvider";
+import { ErrorContext } from "./State";
 
 export default function ErrorTray() {
   const { errors, removeError } = useContext(ErrorContext);

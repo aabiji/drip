@@ -1,7 +1,7 @@
 import { useContext, useEffect, useState, useRef } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
-import { ErrorContext, PeersContext, TransferContext } from "./StateProvider";
+import { ErrorContext, PeersContext, TransferContext } from "./State";
 import { TRANSFER_RESPONSE } from "./constants";
 import * as sender from "./sender";
 
@@ -89,9 +89,8 @@ function FileAndPeerSelection({
   };
 
   return (
-    <div className="inner-content">
+    <div className="content">
       <div className="upper-container">
-        <h3> Send to </h3>
         {havePeers && peers ? (
           <div className="peers-container">
             {peers.map((name, index) => (
@@ -129,14 +128,14 @@ function FileAndPeerSelection({
         </div>
         <button
           className="send-button" disabled={!canSend}
-          onClick={() => setSending(true)}>Send</button>
+          onClick={() => setSending(true)}>Send files</button>
       </div>
     </div>
   );
 }
 
 // TODO: handle the edge case where the peer disconnects during transferring...
-export default function TransferPane() {
+export default function TransferView() {
   const {
     sending, setSending,
     transferIds, setTransferIds,
@@ -185,14 +184,14 @@ export default function TransferPane() {
   }, []);
 
   return (
-    <div className="inner-content">
+    <div className="content">
       {!sending &&
         <FileAndPeerSelection
           setSending={setSending}
           selectedPeers={selectedPeers} setSelectedPeers={setSelectedPeers}
           selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
       {sending &&
-        <div className="inner-content">
+        <div className="content">
           {(() => {
             const done = Object.values(sender.TRANSFERS).every(transfer => transfer.done);
             const failed = Object.values(sender.TRANSFERS).every(transfer => transfer.hadError);

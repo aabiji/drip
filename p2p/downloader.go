@@ -1,11 +1,9 @@
 package p2p
 
 import (
-	"encoding/json"
 	"log"
 	"os"
 	"path"
-	"strings"
 	"sync"
 
 	"github.com/edsrzf/mmap-go"
@@ -45,62 +43,24 @@ type Downloader struct {
 	DownloadFolder string                       `json:"downloadFolder"`
 }
 
-func NewDownloader(settingsPath string) (*Downloader, error) {
-	exists, err := fileExists(settingsPath)
+func NewDownloader() *Downloader {
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return nil, err
+		panic(err)
 	}
 
-	downloader := &Downloader{}
-	if exists {
-		contents, err := os.ReadFile(settingsPath)
-		if err != nil {
-			return nil, err
-		}
-
-		err = json.Unmarshal(contents, &downloader)
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		downloader.Transfers = make(map[string]TransferInfo)
-		downloader.States = make(map[string]*TransferResponse)
+	return &Downloader{
+		Transfers:      make(map[string]TransferInfo),
+		States:         make(map[string]*TransferResponse),
+		DownloadFolder: path.Join(home, "Downloads"),
 	}
-
-	// set a default path
-	if len(strings.TrimSpace(downloader.DownloadFolder)) == 0 {
-		home, err := os.UserHomeDir()
-		if err != nil {
-			panic(err)
-		}
-		downloader.DownloadFolder = path.Join(home, "Downloads")
-	}
-
-	// open files associated to ongoing transfers
-	for transferId, info := range downloader.Transfers {
-		state := downloader.States[transferId]
-		fullpath := path.Join(downloader.DownloadFolder, info.FileName)
-		state.file, err = OpenFile(fullpath, info.FileSize)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	return downloader, nil
 }
 
-func (d *Downloader) Close(settingsFile string) error {
+func (d *Downloader) Close() error {
 	for _, state := range d.States {
 		state.file.Flush()
 		state.file.Unmap()
 	}
-
-	// save state -- TODO: test later
-	//jsonData, err := json.Marshal(*d)
-	//if err != nil {
-	//	return err
-	//}
-	//return os.WriteFile(settingsFile, jsonData, 0644)
 	return nil
 }
 

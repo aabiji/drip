@@ -1,10 +1,10 @@
 import { useContext, useState } from "react";
-import { ThemeContext } from "./StateProvider";
+import { ThemeContext } from "./State";
 
 import { ReactComponent as SunIcon } from "./assets/sun.svg";
 import { ReactComponent as MoonIcon } from "./assets/moon.svg";
 
-export default function Settings() {
+export default function SettingsView() {
   const startYear = 2025;
   const currentYear = new Date().getFullYear();
   const copyright =
@@ -15,7 +15,7 @@ export default function Settings() {
   const { theme, setTheme } = useContext(ThemeContext);
 
   return (
-    <div className="inner-content">
+    <div className="content">
       <div className="row">
         <p className="input-label">Toggle theme</p>
         <button
@@ -27,6 +27,26 @@ export default function Settings() {
             : <SunIcon className="icon-button-svg" />
           }
         </button>
+      </div>
+
+      <div className="row">
+        <p>Trust peers</p>
+        <label className="custom-checkbox">
+          <input
+            type="checkbox" className="checkbox"
+            onChange={(event) => selectPeer(event, name)} />
+          <span className="fake-checkbox"></span>
+        </label>
+      </div>
+
+      <div className="row">
+        <p>Show popups</p>
+        <label className="custom-checkbox">
+          <input
+            type="checkbox" className="checkbox"
+            onChange={(event) => selectPeer(event, name)} />
+          <span className="fake-checkbox"></span>
+        </label>
       </div>
 
       <div className="row">

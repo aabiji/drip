@@ -7,7 +7,7 @@ Currently in progress...
 Build:
 ```bash
 # Should change the port when running multiple instances of the program
-wails dev -devserver "localhost:1234" 
+wails dev -devserver "localhost:1234"
 ```
 
 Credits:

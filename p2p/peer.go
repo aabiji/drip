@@ -127,14 +127,16 @@ func (p *Peer) CreateConnection() {
 
 func (p *Peer) SetupDataChannels() {
 	handler := func(msg Message) {
-		// Forward transfer replies to the frontend
-		if msg.MessageType == TRANSFER_RESPONSE {
+		// Forward session responses to the frontend
+		if msg.MessageType == SESSSION_RESPONSE {
 			p.appEvents <- msg
 			return
 		}
 
-		reply := p.downloader.HandleMessage(msg)
-		p.Webrtc.QueueMessage(reply)
+		reply := p.downloader.ReceiveMessage(msg)
+		if reply != nil {
+			p.Webrtc.QueueMessage(*reply)
+		}
 	}
 
 	go func() { p.tcpMedium.ForwardMessages(p.ctx) }()

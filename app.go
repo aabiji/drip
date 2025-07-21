@@ -2,8 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
-	"os"
 
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -29,29 +27,6 @@ func NewApp() *App {
 	}
 }
 
-func createFrontendBindings(jsPath string) error {
-	output, err := os.OpenFile(jsPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
-	if err != nil {
-		return err
-	}
-	defer output.Close()
-
-	frontendEvents := []string{
-		p2p.TRANSFER_RESPONSE,
-		p2p.PEERS_UPDATED,
-	}
-
-	for _, event := range frontendEvents {
-		jsLine := fmt.Sprintf("export const %s = '%s';\n", event, event)
-		_, err := output.WriteString(jsLine)
-		if err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (a *App) startup(ctx context.Context) {
 	a.ctx = ctx
 
@@ -68,12 +43,6 @@ func (a *App) startup(ctx context.Context) {
 			runtime.EventsEmit(a.ctx, event.MessageType, event)
 		}
 	}()
-
-	// Generate frontend bindings for our event types
-	err := createFrontendBindings("frontend/src/constants.js")
-	if err != nil {
-		panic(err)
-	}
 }
 
 func (a *App) shutdown(ctx context.Context) {
@@ -89,38 +58,25 @@ func (a *App) shutdown(ctx context.Context) {
 
 func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 
-func (a *App) stillConnected(peerId string) bool {
-	peer, exists := a.finder.Peers[peerId]
-	return exists && peer.Connected()
-}
-
 // the following functions are exported to the frontend
-func (a *App) StartFileTransfer(info p2p.TransferInfo) error {
-	if !a.stillConnected(info.Recipient) {
-		return fmt.Errorf("%s has disconnected", info.Recipient)
+func (a *App) RequestSessionAuth(info p2p.SessionInfo) error {
+	msg := p2p.NewMessage(p2p.SESSION_INFO, info)
+	for _, peer := range info.Recipients {
+		a.finder.Peers[peer].Webrtc.QueueMessage(msg)
 	}
-
-	msg := p2p.NewMessage(p2p.TRANSFER_INFO, info)
-	a.finder.Peers[info.Recipient].Webrtc.QueueMessage(msg)
 	return nil
 }
 
 func (a *App) SendFileChunk(chunk p2p.TransferChunk) error {
-	if !a.stillConnected(chunk.Recipient) {
-		return fmt.Errorf("%s has disconnected", chunk.Recipient)
-	}
-
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
 	a.finder.Peers[chunk.Recipient].Webrtc.QueueMessage(msg)
 	return nil
 }
 
-func (a *App) SendCancelSignal(signal p2p.TransferCancel) error {
-	if !a.stillConnected(signal.Recipient) {
-		return fmt.Errorf("%s has disconnected", signal.Recipient)
+func (a *App) CancelSession(signal p2p.SessionCancel) error {
+	for _, peer := range signal.Recipients {
+		msg := p2p.NewMessage(p2p.SESSION_CANCEL, signal)
+		a.finder.Peers[peer].Webrtc.QueueMessage(msg)
 	}
-
-	msg := p2p.NewMessage(p2p.TRANSFER_CANCEL, signal)
-	a.finder.Peers[signal.Recipient].Webrtc.QueueMessage(msg)
 	return nil
 }

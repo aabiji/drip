@@ -1,7 +1,6 @@
 import { createContext, useEffect, useState } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 import { GetPeers } from "../wailsjs/go/main/App";
-import { PEERS_UPDATED } from "./constants";
 
 export const PeersContext = createContext([]);
 export const ErrorContext = createContext([]);
@@ -12,7 +11,7 @@ export default function State({ children }) {
   // Periodically fetch list of peers from the backend
   const [peers, setPeers] = useState([]);
   useEffect(() => {
-    EventsOn(PEERS_UPDATED, () => GetPeers().then((names) => setPeers(names)));
+    EventsOn("PEERS_UPDATED", () => GetPeers().then((names) => setPeers(names)));
   }, []);
 
   // TODO: save to disk

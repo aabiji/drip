@@ -4,18 +4,9 @@ import (
 	"log"
 	"os"
 	"path"
-	"sync"
 
 	"github.com/edsrzf/mmap-go"
 )
-
-// file transfer message types
-type TransferInfo struct {
-	TransferId string `json:"transferId"`
-	Recipient  string `json:"recipient"`
-	FileName   string `json:"name"`
-	FileSize   int64  `json:"size"`
-}
 
 type TransferChunk struct {
 	TransferId string  `json:"transferId"`
@@ -24,23 +15,34 @@ type TransferChunk struct {
 	Offset     int64   `json:"offset"`
 }
 
-type TransferCancel struct {
+type Transfer struct {
 	TransferId string `json:"transferId"`
 	Recipient  string `json:"recipient"`
+	FileSize   int64  `json:"size"`
+
+	file mmap.MMap
 }
 
-type TransferResponse struct {
-	TransferId     string `json:"transferId"`
-	AmountReceived int64  `json:"amountReceived"`
-	Cancelled      bool   `json:"cancelled"`
-	file           mmap.MMap
+type SessionInfo struct {
+	SessionId  string     `json:"sessionId"`
+	Recipients []string   `json:"recipients"`
+	Transfers  []Transfer `json:"transfers"`
+}
+
+type SessionCancel struct {
+	SessionId  string   `json:"sessionId"`
+	Recipients []string `json:"recipients"`
+}
+
+type SessionResponse struct {
+	SessionId string `json:"sessionId"`
+	Accepted  bool   `json:"accepted"`
 }
 
 type Downloader struct {
-	mutex          sync.Mutex
-	Transfers      map[string]TransferInfo      `json:"transfers"`
-	States         map[string]*TransferResponse `json:"states"`
-	DownloadFolder string                       `json:"downloadFolder"`
+	downloadFolder string
+	Transfers      map[string]*Transfer
+	Sessions       map[string]SessionInfo
 }
 
 func NewDownloader() *Downloader {
@@ -50,118 +52,117 @@ func NewDownloader() *Downloader {
 	}
 
 	return &Downloader{
-		Transfers:      make(map[string]TransferInfo),
-		States:         make(map[string]*TransferResponse),
-		DownloadFolder: path.Join(home, "Downloads"),
+		Transfers:      make(map[string]*Transfer),
+		Sessions:       make(map[string]SessionInfo),
+		downloadFolder: path.Join(home, "Downloads"),
 	}
 }
 
 func (d *Downloader) Close() error {
-	for _, state := range d.States {
-		state.file.Flush()
-		state.file.Unmap()
+	for _, transfer := range d.Transfers {
+		transfer.file.Flush()
+		transfer.file.Unmap()
 	}
 	return nil
 }
 
-func (d *Downloader) HandleMessage(msg Message) Message {
+func (d *Downloader) ReceiveMessage(msg Message) *Message {
 	switch msg.MessageType {
-	case TRANSFER_INFO:
-		info, err := DeserializeInto[TransferInfo](msg)
+	case SESSION_INFO:
+		info, err := DeserializeInto[SessionInfo](msg)
 		if err != nil {
 			panic(err)
 		}
-		return d.handleInfo(info)
+		return d.receiveInfo(info)
 	case TRANSFER_CHUNK:
 		chunk, err := DeserializeInto[TransferChunk](msg)
 		if err != nil {
 			panic(err)
 		}
-		return d.handleChunk(chunk)
-	case TRANSFER_CANCEL:
-		info, err := DeserializeInto[TransferCancel](msg)
+		return d.receiveChunk(chunk)
+	case SESSION_CANCEL:
+		info, err := DeserializeInto[SessionCancel](msg)
 		if err != nil {
 			panic(err)
 		}
-		return d.handleCancel(info.TransferId)
+		return d.receiveCancel(info.SessionId)
 	}
 	log.Panicf("Received unkonwn message: %v\n", msg)
-	return Message{}
+	return nil
 }
 
-func (d *Downloader) handleInfo(info TransferInfo) Message {
-	fullpath := path.Join(d.DownloadFolder, info.FileName)
-	contents, err := OpenFile(fullpath, info.FileSize)
-	if err != nil {
-		panic(err)
+func (d *Downloader) receiveInfo(info SessionInfo) *Message {
+	// TODO: ask for user confirmation
+
+	d.Sessions[info.SessionId] = info
+	for _, t := range info.Transfers {
+		if t.Recipient != getDeviceName() {
+			continue // not for us
+		}
+
+		fullpath := path.Join(d.downloadFolder, t.TransferId)
+		contents, err := OpenFile(fullpath, t.FileSize)
+		if err != nil {
+			panic(err)
+		}
+
+		transfer := &Transfer{
+			TransferId: t.TransferId,
+			Recipient:  t.Recipient,
+			FileSize:   t.FileSize,
+			file:       contents,
+		}
+		log.Println("Set ", t.TransferId)
+		d.Transfers[t.TransferId] = transfer
 	}
 
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-
-	state := &TransferResponse{
-		TransferId:     info.TransferId,
-		AmountReceived: 0,
-		file:           contents,
-	}
-
-	d.States[info.TransferId] = state
-	d.Transfers[info.TransferId] = info
-	return NewMessage(TRANSFER_RESPONSE, *state)
+	msg := NewMessage(SESSSION_RESPONSE, SessionResponse{
+		SessionId: info.SessionId, Accepted: true,
+	})
+	return &msg
 }
 
-func (d *Downloader) handleChunk(chunk TransferChunk) Message {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
-
-	state, exists := d.States[chunk.TransferId]
-	if !exists { // must have been deleted
-		t := TransferResponse{TransferId: chunk.TransferId, Cancelled: true}
-		return NewMessage(TRANSFER_RESPONSE, t)
-	}
-
-	info := d.Transfers[chunk.TransferId]
+func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
+	transfer := d.Transfers[chunk.TransferId]
 	chunkSize := int64(len(chunk.Data))
 
-	// already got this chunk, ignore
-	if state.AmountReceived >= chunk.Offset+chunkSize {
-		return NewMessage(TRANSFER_RESPONSE, *state)
-	}
-
-	if err := state.file.Lock(); err != nil {
+	if err := transfer.file.Lock(); err != nil {
 		panic(err)
 	}
-	copy(state.file[chunk.Offset:], chunk.Data)
-	if err := state.file.Unlock(); err != nil {
+	copy(transfer.file[chunk.Offset:], chunk.Data)
+	if err := transfer.file.Unlock(); err != nil {
 		panic(err)
 	}
-	if err := state.file.Flush(); err != nil { // TODO: faster way?
+	if err := transfer.file.Flush(); err != nil { // TODO: faster way?
 		panic(err)
 	}
 
-	state.AmountReceived = chunk.Offset + chunkSize
-	if state.AmountReceived >= info.FileSize { // last chunk, done writing
-		state.file.Unmap()
+	// last chunk, done writing
+	if chunk.Offset+chunkSize >= transfer.FileSize {
+		transfer.file.Unmap()
+		log.Printf("Downloaded %s\n", chunk.TransferId)
 	}
-	return NewMessage(TRANSFER_RESPONSE, *state)
+	return nil
 }
 
-func (d *Downloader) handleCancel(transferId string) Message {
-	d.mutex.Lock()
-	defer d.mutex.Unlock()
+func (d *Downloader) receiveCancel(sessionId string) *Message {
+	for _, transferCopy := range d.Sessions[sessionId].Transfers {
+		if transferCopy.Recipient != getDeviceName() {
+			continue // not for us
+		}
 
-	if err := d.States[transferId].file.Unmap(); err != nil {
-		panic(err)
+		transfer := d.Transfers[transferCopy.TransferId]
+		if err := transfer.file.Unmap(); err != nil {
+			panic(err)
+		}
+
+		fullpath := path.Join(d.downloadFolder, transfer.TransferId)
+		if err := os.Remove(fullpath); err != nil {
+			panic(err)
+		}
+
+		delete(d.Transfers, transfer.TransferId)
 	}
-
-	fullpath := path.Join(d.DownloadFolder, d.Transfers[transferId].FileName)
-	if err := os.Remove(fullpath); err != nil {
-		panic(err)
-	}
-
-	delete(d.States, transferId)
-	delete(d.Transfers, transferId)
-
-	state := TransferResponse{TransferId: transferId, Cancelled: true}
-	return NewMessage(TRANSFER_RESPONSE, state)
+	delete(d.Sessions, sessionId)
+	return nil
 }

@@ -20,10 +20,10 @@ const (
 	ICE_PACKET    = "ICE_PACKET"
 
 	// file transfer message types
-	TRANSFER_INFO     = "TRANSFER_INFO"
+	SESSION_INFO      = "SESSION_INFO"
+	SESSSION_RESPONSE = "SESSSION_RESPONSE"
+	SESSION_CANCEL    = "SESSION_CANCEL"
 	TRANSFER_CHUNK    = "TRANSFER_CHUNK"
-	TRANSFER_RESPONSE = "TRANSFER_RESPONSE"
-	TRANSFER_CANCEL   = "TRANSFER_CANCEL"
 
 	// general message type
 	PEERS_UPDATED = "PEERS_UPDATED"
@@ -72,7 +72,7 @@ func DeserializeInto[T any](msg Message) (T, error) {
 }
 
 type Medium interface {
-	QueueMessage(msg Message)
+	QueueMessage(msg Message) // Queue message for sending
 	ForwardMessages(ctx context.Context)
 	ReceiveMessages(ctx context.Context, handler func(msg Message))
 	Connected() bool

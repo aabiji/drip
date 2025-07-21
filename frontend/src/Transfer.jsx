@@ -1,138 +1,119 @@
-import { useContext, useEffect, useState, useRef } from "react";
+import { useContext, useEffect, useState } from "react";
+
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
-import { ErrorContext, PeersContext, TransferContext } from "./State";
-import { TRANSFER_RESPONSE } from "./constants";
-import * as sender from "./sender";
+ // see downloader.go for the json schemas to these function arguments
+import { RequestSessionAuth, CancelSession, SendFileChunk } from "../wailsjs/go/main/App";
 
-import { ReactComponent as UploadIcon } from "./assets/upload.svg";
+import { ErrorContext, TransferContext } from "./State";
+import TransferSelection from "./TransferSelection";
 
-function FileEntry({ name, progress, onClick, recipient, error }) {
-  const barElement = useRef();
-  const [full, setFull] = useState(false);
-  const [msg, setMsg] = useState(
-    recipient !== undefined ? `Sending ${name} to ${recipient}` : name
-  );
+// Edge cases:
+// - Peer disconnects during transfer
+// - We disconnect during transfer
+// - Can't read from file
 
-  useEffect(() => {
-    if (error && recipient !== undefined) {
-      progress = undefined;
-      barElement.current.style.width = "0px";
-      setMsg(`Failed to send ${name} to ${recipient}`);
-      return;
-    }
-
-    if (progress !== undefined) {
-      barElement.current.style.width = `${Math.min(progress, 1.0) * 100}%`;
-      setFull(progress >= 1.0);
-    }
-  }, [progress, error]);
-
-  return (
-    <div className={full ? "file-entry full" : error ? "file-entry error" : "file-entry"}>
-      <div className="inner">
-        <p>{msg}</p>
-        {onClick !== undefined && <button onClick={onClick}>x</button>}
-      </div>
-      {progress !== undefined && <div className="progress-bar" ref={barElement}></div>}
-    </div>
-  );
+function randomizeFilename(filename) {
+  const parts = filename.split('.');
+  const [base, extension] = [parts[0], parts[parts.length - 1]];
+  const random = crypto.randomUUID();
+  return `${base}-${random}.${extension}`;
 }
 
-function FileAndPeerSelection({
-  setSending, selectedPeers, setSelectedPeers,
-  selectedFiles, setSelectedFiles
-}) {
-  const peers = useContext(PeersContext);
-  const [havePeers, setHavePeers] = useState(false);
-  const [canSend, setCanSend] = useState(false);
+class Transfer {
+  constructor(file, id, recipient) {
+    this.id = id;
+    this.recipient = recipient;
+    this.file = file;
+    this.amountSent = 0;
+    this.done = false;
+  }
 
-  // Fetch list of peers from the backend
-  useEffect(() => {
-    setHavePeers(peers && peers.length > 0);
-    setCanSend(selectedFiles.length > 0 && selectedPeers.length > 0);
-  }, [peers, selectedFiles, selectedPeers]);
+  async start() {
+    const reader = this.file.stream().getReader();
 
-  const selectPeer = (event, name) => {
-    setSelectedPeers((prev) => {
-      const list = event.target.checked
-        ? [...prev, name]
-        : prev.filter((peer) => peer != name);
-      return list;
-    });
-  };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        this.done = true;
+        console.log(`Done sending ${this.id}`);
+        break;
+      }
 
-  const addNonDuplicateFiles = (files) => {
-    setSelectedFiles((prev) => {
-      const existing = new Set(prev.map((f) => `${f.name}-${f.size}`));
-      const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
-      return [...prev, ...unique];
-    });
-  };
-
-  const removeFile = (name) =>
-    setSelectedFiles((prev) => prev.filter((f) => f.name != name));
-
-  const dragOverHandler = (event) => { event.preventDefault(); }
-
-  const dropHandler = (event) => {
-    event.preventDefault();
-    let files = [];
-    if (event.dataTransfer.items) {
-      files = Array.from(event.dataTransfer.items)
-        .filter((item) => item.kind === "file")
-        .map((item) => item.getAsFile());
-    } else {
-      files = event.dataTransfer.files;
+      console.log(`Sending chunk for ${this.id}`);
+      await SendFileChunk({
+        transferId: this.id,
+        offset: this.amountSent,
+        recipient: this.recipient,
+        data: Array.from(value),
+      });
+      this.amountSent += value.length;
     }
-    addNonDuplicateFiles(files);
-  };
-
-  return (
-    <div className="content">
-      <div className="upper-container">
-        {havePeers && peers ? (
-          <div className="peers-container">
-            {peers.map((name, index) => (
-              <div className="peer-entry" key={index}>
-                <label className="custom-checkbox">
-                  <input
-                    type="checkbox" className="checkbox"
-                    onChange={(event) => selectPeer(event, name)} />
-                  <span className="fake-checkbox"></span>
-                </label>
-                <p>{name}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p> There are no devices around to connect to </p>
-        )}
-      </div>
-
-      <div className="upload-container">
-        <div
-          className="file-input-container"
-          onDrop={(event) => dropHandler(event)}
-          onDragOver={(event) => dragOverHandler(event)}>
-          <label className="file-label">
-            <UploadIcon className="upload-icon" />
-            <p>Drag and drop or choose files</p>
-            <input type="file" onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
-          </label>
-        </div>
-        <div className="file-selection-container">
-          {selectedFiles.map((file, index) => (
-            <FileEntry key={index} name={file.name} onClick={() => removeFile(file.name)} />
-          ))}
-        </div>
-        <button
-          className="send-button" disabled={!canSend}
-          onClick={() => setSending(true)}>Send files</button>
-      </div>
-    </div>
-  );
+  }
 }
+
+class Session {
+  constructor(files, recipients) {
+    this.id = crypto.randomUUID();
+
+    // map each peer to whether they have authorized or not
+    this.recipients = recipients.reduce((map, key) => {
+      map[key] = false;
+      return map;
+    }, {});
+
+    this.transfers = {};
+    for (const file of files) {
+      for (const peer of recipients) {
+        const transferId = randomizeFilename(file.name);
+        const copy = new File([file], transferId, { type: file.type });
+        this.transfers[transferId] = new Transfer(copy, transferId, peer);
+      }
+    }
+  }
+
+  // return true if all the recipients have authorized the batch of transfers
+  fullyAuthorized() { return Object.values(this.recipients).every(Boolean); }
+
+  async requestAuthorization() {
+    let payload = {
+      sessionId: this.id,
+      recipients: Object.keys(this.recipients),
+      transfers: Object.values(this.transfers).map(t => ({
+        transferId: t.id,
+        recipient: t.recipient,
+        size: t.file.size
+      }))
+    };
+    await RequestSessionAuth(payload);
+    console.log(`Requesting auth for ${this.id}`);
+  }
+
+  async cancel() {
+    await CancelSession({ sessionId: this.id, recipients: Object.keys(this.recipients) });
+    console.log(`Cancelling ${this.id}`);
+  }
+
+  async handleResponse(response) {
+    const json = JSON.parse(atob(response["data"]));
+
+    if (!json.accepted) {
+      await this.cancel();
+      throw new Error(`${response.senderId} does not allow the transfer`);
+    }
+
+    this.recipients[response.senderId] = true;
+    if (this.fullyAuthorized()) {
+      console.log(`${this.id} is fully authorized!`);
+      for (const id in this.transfers) {
+        this.transfers[id].start();
+      }
+    }
+  }
+}
+
+// Only allowing the user to transfer one batch at a time
+let CURRENT_SESSION = undefined;
 
 // TODO: handle the edge case where the peer disconnects during transferring...
 export default function TransferView() {
@@ -152,17 +133,17 @@ export default function TransferView() {
 
   useEffect(() => {
     errorHandler(async () => {
-      if (sending)
-        sender.startTransfer(selectedFiles, selectedPeers, setTransferIds);
-      setSelectedFiles([]);
-      setSelectedPeers([]);
+      if (sending) {
+        CURRENT_SESSION = new Session(selectedFiles, selectedPeers);
+        await CURRENT_SESSION.requestAuthorization();
+      }
     });
   }, [sending]);
 
   useEffect(() => {
     errorHandler(async () => {
       if (cancel) {
-        await sender.cancelTransfers();
+        await CURRENT_SESSION.cancel();
         setSending(false);
         setCancel(false);
       }
@@ -171,30 +152,23 @@ export default function TransferView() {
 
   // TODO: resuming transfers???
   useEffect(() => {
-    const cancelListener = EventsOn(TRANSFER_RESPONSE,
-      (data) => errorHandler(async () => await sender.handleResponse(data, setTransferIds)));
-
-    const intervalId = setInterval(() =>
-      errorHandler(async () => await sender.resendMessages(setTransferIds)),
-    10000);
-    return () => {
-      cancelListener();
-      clearInterval(intervalId);
-    }
+    const stop = EventsOn("SESSSION_RESPONSE",
+      (data) => errorHandler(async () => await CURRENT_SESSION.handleResponse(data)));
+    return () => stop();
   }, []);
 
   return (
     <div className="content">
       {!sending &&
-        <FileAndPeerSelection
+        <TransferSelection
           setSending={setSending}
           selectedPeers={selectedPeers} setSelectedPeers={setSelectedPeers}
           selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
       {sending &&
         <div className="content">
           {(() => {
-            const done = Object.values(sender.TRANSFERS).every(transfer => transfer.done);
-            const failed = Object.values(sender.TRANSFERS).every(transfer => transfer.hadError);
+            const done = false;//Object.values(CURRENT_SESSION.transfers).every(t => t.done);
+            const failed = false; // TODO: handle error handling
             return (
               <div className="status-top-row">
                 <button onClick={() => done ? setSending(false) : setCancel(true)}>
@@ -207,9 +181,9 @@ export default function TransferView() {
 
           <div className="progress-container">
             {transferIds.map(id => {
-              const t = sender.TRANSFERS[id];
+              const t = CURRENT_SESSION.transfers[id];
               if (t === undefined) return null;
-              return <FileEntry key={id} name={t.file.name} error={t.hadError}
+              return <FileEntry key={id} name={t.file.name}
                         recipient={t.recipient} progress={t.amountSent / t.file.size} />;
             })}
           </div>

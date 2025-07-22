@@ -15,13 +15,14 @@ func main() {
 	app := NewApp()
 
 	err := wails.Run(&options.App{
-		Title:       "drip",
-		Width:       900,
-		Height:      700,
-		AssetServer: &assetserver.Options{Assets: assets},
-		OnStartup:   app.startup,
-		OnShutdown:  app.shutdown,
-		Bind:        []any{app},
+		Title:             "drip",
+		Width:             900,
+		Height:            700,
+		AssetServer:       &assetserver.Options{Assets: assets},
+		OnStartup:         app.startup,
+		OnShutdown:        app.shutdown,
+		Bind:              []any{app},
+		HideWindowOnClose: false, // TODO: set to true, also look at: https://wails.io/docs/reference/runtime/window/
 	})
 
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"log"
 	"os"
 	"path"
+	"sync"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -27,6 +28,9 @@ type SessionInfo struct {
 	SessionId  string     `json:"sessionId"`
 	Recipients []string   `json:"recipients"`
 	Transfers  []Transfer `json:"transfers"`
+	Sender     string     `json:"sender,omitempty"`
+
+	done bool
 }
 
 type SessionCancel struct {
@@ -41,8 +45,9 @@ type SessionResponse struct {
 
 type Downloader struct {
 	downloadFolder string
-	Transfers      map[string]*Transfer
-	Sessions       map[string]SessionInfo
+	transfers      map[string]*Transfer
+	mutex          sync.Mutex // guards transfers
+	sessions       map[string]SessionInfo
 }
 
 func NewDownloader() *Downloader {
@@ -52,18 +57,25 @@ func NewDownloader() *Downloader {
 	}
 
 	return &Downloader{
-		Transfers:      make(map[string]*Transfer),
-		Sessions:       make(map[string]SessionInfo),
+		transfers:      make(map[string]*Transfer),
+		sessions:       make(map[string]SessionInfo),
 		downloadFolder: path.Join(home, "Downloads"),
 	}
 }
 
-func (d *Downloader) Close() error {
-	for _, transfer := range d.Transfers {
+func (d *Downloader) Close() {
+	for _, transfer := range d.transfers {
 		transfer.file.Flush()
 		transfer.file.Unmap()
 	}
-	return nil
+}
+
+func (d *Downloader) CancelSessions(disconnectedPeer string) {
+	for _, session := range d.sessions {
+		if session.Sender == disconnectedPeer && !session.done {
+			d.receiveCancel(session.SessionId)
+		}
+	}
 }
 
 func (d *Downloader) ReceiveMessage(msg Message) *Message {
@@ -73,6 +85,7 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 		if err != nil {
 			panic(err)
 		}
+		info.Sender = msg.SenderId
 		return d.receiveInfo(info)
 	case TRANSFER_CHUNK:
 		chunk, err := DeserializeInto[TransferChunk](msg)
@@ -93,8 +106,10 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 
 func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	// TODO: ask for user confirmation
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
 
-	d.Sessions[info.SessionId] = info
+	d.sessions[info.SessionId] = info
 	for _, t := range info.Transfers {
 		if t.Recipient != getDeviceName() {
 			continue // not for us
@@ -113,7 +128,7 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 			file:       contents,
 		}
 		log.Println("Set ", t.TransferId)
-		d.Transfers[t.TransferId] = transfer
+		d.transfers[t.TransferId] = transfer
 	}
 
 	msg := NewMessage(SESSSION_RESPONSE, SessionResponse{
@@ -123,7 +138,13 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 }
 
 func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
-	transfer := d.Transfers[chunk.TransferId]
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	transfer, exists := d.transfers[chunk.TransferId]
+	if !exists {
+		return nil // we must have deleted the transfer beforehand
+	}
 	chunkSize := int64(len(chunk.Data))
 
 	if err := transfer.file.Lock(); err != nil {
@@ -146,12 +167,15 @@ func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
 }
 
 func (d *Downloader) receiveCancel(sessionId string) *Message {
-	for _, transferCopy := range d.Sessions[sessionId].Transfers {
+	d.mutex.Lock()
+	defer d.mutex.Unlock()
+
+	for _, transferCopy := range d.sessions[sessionId].Transfers {
 		if transferCopy.Recipient != getDeviceName() {
 			continue // not for us
 		}
 
-		transfer := d.Transfers[transferCopy.TransferId]
+		transfer := d.transfers[transferCopy.TransferId]
 		if err := transfer.file.Unmap(); err != nil {
 			panic(err)
 		}
@@ -161,8 +185,8 @@ func (d *Downloader) receiveCancel(sessionId string) *Message {
 			panic(err)
 		}
 
-		delete(d.Transfers, transfer.TransferId)
+		delete(d.transfers, transfer.TransferId)
 	}
-	delete(d.Sessions, sessionId)
+	delete(d.sessions, sessionId)
 	return nil
 }

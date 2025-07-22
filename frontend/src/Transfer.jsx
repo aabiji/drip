@@ -1,17 +1,12 @@
 import { useContext, useEffect, useState } from "react";
-
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
- // see downloader.go for the json schemas to these function arguments
-import { RequestSessionAuth, CancelSession, SendFileChunk } from "../wailsjs/go/main/App";
+import { // see downloader.go for the json schemas to these function arguments
+  CancelSession, RequestSessionAuth, SendFileChunk
+} from "../wailsjs/go/main/App";
 
 import { ErrorContext, TransferContext } from "./State";
-import TransferSelection from "./TransferSelection";
-
-// Edge cases:
-// - Peer disconnects during transfer
-// - We disconnect during transfer
-// - Can't read from file
+import TransferSelection, { FileEntry } from "./Selection";
 
 function randomizeFilename(filename) {
   const parts = filename.split('.');
@@ -27,34 +22,42 @@ class Transfer {
     this.file = file;
     this.amountSent = 0;
     this.done = false;
+    this.hadError = false;
   }
 
-  async start() {
+  async start(setTransferIds, addError) {
     const reader = this.file.stream().getReader();
 
     while (true) {
       const { done, value } = await reader.read();
       if (done) {
         this.done = true;
-        console.log(`Done sending ${this.id}`);
         break;
       }
 
-      console.log(`Sending chunk for ${this.id}`);
-      await SendFileChunk({
-        transferId: this.id,
-        offset: this.amountSent,
-        recipient: this.recipient,
-        data: Array.from(value),
-      });
-      this.amountSent += value.length;
+      try {
+        await SendFileChunk({
+          transferId: this.id,
+          offset: this.amountSent,
+          recipient: this.recipient,
+          data: Array.from(value),
+        });
+
+        this.amountSent += value.length;
+        setTransferIds(prev => [...prev]); // force react to rerender
+      } catch (error) {
+        this.hadError = true;
+        addError(error.toString());
+        break;
+      }
     }
   }
 }
 
 class Session {
-  constructor(files, recipients) {
+  constructor(files, recipients, setTransferIds) {
     this.id = crypto.randomUUID();
+    this.hadError = false;
 
     // map each peer to whether they have authorized or not
     this.recipients = recipients.reduce((map, key) => {
@@ -70,43 +73,53 @@ class Session {
         this.transfers[transferId] = new Transfer(copy, transferId, peer);
       }
     }
+    setTransferIds(Object.keys(this.transfers));
   }
 
   // return true if all the recipients have authorized the batch of transfers
   fullyAuthorized() { return Object.values(this.recipients).every(Boolean); }
 
   async requestAuthorization() {
-    let payload = {
-      sessionId: this.id,
-      recipients: Object.keys(this.recipients),
-      transfers: Object.values(this.transfers).map(t => ({
-        transferId: t.id,
-        recipient: t.recipient,
-        size: t.file.size
-      }))
-    };
-    await RequestSessionAuth(payload);
-    console.log(`Requesting auth for ${this.id}`);
+    try {
+      await RequestSessionAuth({
+        sessionId: this.id,
+        recipients: Object.keys(this.recipients),
+        transfers: Object.values(this.transfers).map(t => ({
+          transferId: t.id,
+          recipient: t.recipient,
+          size: t.file.size
+        }))
+      });
+    } catch (error) {
+      this.hadError = true;
+      addError(error.toString());
+    }
   }
 
-  async cancel() {
-    await CancelSession({ sessionId: this.id, recipients: Object.keys(this.recipients) });
-    console.log(`Cancelling ${this.id}`);
+  async cancel(addError) {
+    try {
+      await CancelSession({
+        sessionId: this.id, recipients: Object.keys(this.recipients)
+      });
+    } catch (error) {
+      this.hadError = true;
+      addError(error.toString());
+    }
   }
 
-  async handleResponse(response) {
+  async handleResponse(response, setTransferIds, addError) {
     const json = JSON.parse(atob(response["data"]));
 
     if (!json.accepted) {
-      await this.cancel();
-      throw new Error(`${response.senderId} does not allow the transfer`);
+      await this.cancel(addError);
+      addError(`${response.senderId} does not allow the transfer`);
+      return;
     }
 
     this.recipients[response.senderId] = true;
     if (this.fullyAuthorized()) {
-      console.log(`${this.id} is fully authorized!`);
       for (const id in this.transfers) {
-        this.transfers[id].start();
+        this.transfers[id].start(setTransferIds, addError);
       }
     }
   }
@@ -115,7 +128,6 @@ class Session {
 // Only allowing the user to transfer one batch at a time
 let CURRENT_SESSION = undefined;
 
-// TODO: handle the edge case where the peer disconnects during transferring...
 export default function TransferView() {
   const {
     sending, setSending,
@@ -124,36 +136,32 @@ export default function TransferView() {
     selectedFiles, setSelectedFiles
   } = useContext(TransferContext);
 
+  const { addError } = useContext(ErrorContext);
   const [cancel, setCancel] = useState(false);
 
-  const { addError } = useContext(ErrorContext);
-  const errorHandler = async (func) => {
-    try {await func(); } catch (error) { addError(error.toString()); }
-  }
-
   useEffect(() => {
-    errorHandler(async () => {
-      if (sending) {
-        CURRENT_SESSION = new Session(selectedFiles, selectedPeers);
-        await CURRENT_SESSION.requestAuthorization();
-      }
-    });
+    if (sending) {
+      CURRENT_SESSION = new Session(selectedFiles, selectedPeers, setTransferIds);
+      CURRENT_SESSION.requestAuthorization(addError);
+    } else {
+      CURRENT_SESSION = undefined;
+    }
   }, [sending]);
 
   useEffect(() => {
-    errorHandler(async () => {
-      if (cancel) {
-        await CURRENT_SESSION.cancel();
-        setSending(false);
-        setCancel(false);
-      }
-    });
+    if (cancel) {
+      CURRENT_SESSION.cancel(addError);
+      CURRENT_SESSION = undefined;
+      setSending(false);
+      setCancel(false);
+    }
   }, [cancel]);
 
-  // TODO: resuming transfers???
   useEffect(() => {
-    const stop = EventsOn("SESSSION_RESPONSE",
-      (data) => errorHandler(async () => await CURRENT_SESSION.handleResponse(data)));
+    const stop = EventsOn("SESSSION_RESPONSE", (data) => {
+      if (CURRENT_SESSION)
+        CURRENT_SESSION.handleResponse(data, setTransferIds, addError);
+    });
     return () => stop();
   }, []);
 
@@ -164,17 +172,27 @@ export default function TransferView() {
           setSending={setSending}
           selectedPeers={selectedPeers} setSelectedPeers={setSelectedPeers}
           selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
+
       {sending &&
         <div className="content">
           {(() => {
-            const done = false;//Object.values(CURRENT_SESSION.transfers).every(t => t.done);
-            const failed = false; // TODO: handle error handling
+            if (CURRENT_SESSION === undefined) return null;
+            const authorized = CURRENT_SESSION.fullyAuthorized();
+            const done = Object.values(CURRENT_SESSION.transfers).every(t => t.done);
+            const failed = CURRENT_SESSION.hadError ||
+              Object.values(CURRENT_SESSION.transfers).some(t => t.hadError);
+
+            let msg = "Sending";
+            if (failed) msg = "Sending failed";
+            if (!authorized) msg = "Waiting for authorization";
+            if (done) msg = "Done sending";
+
             return (
               <div className="status-top-row">
                 <button onClick={() => done ? setSending(false) : setCancel(true)}>
                   {done || failed ? "Back" : "Cancel"}
                 </button>
-                <h1> {done ? "Done sending!" : failed ? "Sending failed" : "Sending"} </h1>
+                <h1>{msg}</h1>
               </div>
             );
           })()}
@@ -183,7 +201,7 @@ export default function TransferView() {
             {transferIds.map(id => {
               const t = CURRENT_SESSION.transfers[id];
               if (t === undefined) return null;
-              return <FileEntry key={id} name={t.file.name}
+              return <FileEntry key={id} name={t.file.name} error={t.hadError}
                         recipient={t.recipient} progress={t.amountSent / t.file.size} />;
             })}
           </div>

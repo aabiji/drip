@@ -34,6 +34,7 @@ export namespace p2p {
 	    sessionId: string;
 	    recipients: string[];
 	    transfers: Transfer[];
+	    sender?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new SessionInfo(source);
@@ -44,6 +45,7 @@ export namespace p2p {
 	        this.sessionId = source["sessionId"];
 	        this.recipients = source["recipients"];
 	        this.transfers = this.convertValues(source["transfers"], Transfer);
+	        this.sender = source["sender"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

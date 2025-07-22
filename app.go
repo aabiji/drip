@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -46,10 +47,7 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
-	err := a.downloader.Close()
-	if err != nil {
-		panic(err)
-	}
+	a.downloader.Close()
 	for _, peer := range a.finder.Peers {
 		peer.Close()
 	}
@@ -61,22 +59,33 @@ func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 // the following functions are exported to the frontend
 func (a *App) RequestSessionAuth(info p2p.SessionInfo) error {
 	msg := p2p.NewMessage(p2p.SESSION_INFO, info)
-	for _, peer := range info.Recipients {
-		a.finder.Peers[peer].Webrtc.QueueMessage(msg)
+	for _, peerId := range info.Recipients {
+		peer, exists := a.finder.Peers[peerId]
+		if exists && peer.Connected() {
+			peer.Webrtc.QueueMessage(msg)
+		}
 	}
 	return nil
 }
 
 func (a *App) SendFileChunk(chunk p2p.TransferChunk) error {
+	peer, exists := a.finder.Peers[chunk.Recipient]
+	if !exists || !peer.Connected() {
+		return fmt.Errorf("%s has disconnected", chunk.Recipient)
+	}
+
 	msg := p2p.NewMessage(p2p.TRANSFER_CHUNK, chunk)
 	a.finder.Peers[chunk.Recipient].Webrtc.QueueMessage(msg)
 	return nil
 }
 
 func (a *App) CancelSession(signal p2p.SessionCancel) error {
-	for _, peer := range signal.Recipients {
-		msg := p2p.NewMessage(p2p.SESSION_CANCEL, signal)
-		a.finder.Peers[peer].Webrtc.QueueMessage(msg)
+	msg := p2p.NewMessage(p2p.SESSION_CANCEL, signal)
+	for _, peerId := range signal.Recipients {
+		peer, exists := a.finder.Peers[peerId]
+		if exists {
+			peer.Webrtc.QueueMessage(msg)
+		}
 	}
 	return nil
 }

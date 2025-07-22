@@ -74,6 +74,7 @@ func (p *Peer) Close() {
 		p.Webrtc.Close()
 		p.Webrtc = nil
 	}
+	p.downloader.CancelSessions(p.Id)
 }
 
 // The default value for an interface is nil, so we want to avoid

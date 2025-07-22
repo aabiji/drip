@@ -3,7 +3,7 @@ import { ReactComponent as UploadIcon } from "./assets/upload.svg";
 
 import { PeersContext } from "./State";
 
-function FileEntry({ name, progress, onClick, recipient, error }) {
+export function FileEntry({ name, progress, onClick, recipient, error }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
   const [msg, setMsg] = useState(
@@ -13,14 +13,14 @@ function FileEntry({ name, progress, onClick, recipient, error }) {
   useEffect(() => {
     if (error && recipient !== undefined) {
       progress = undefined;
-      barElement.current.style.width = "0px";
       setMsg(`Failed to send ${name} to ${recipient}`);
-      return;
     }
 
-    if (progress !== undefined) {
+    if (progress !== undefined && progress > 0) {
       barElement.current.style.width = `${Math.min(progress, 1.0) * 100}%`;
       setFull(progress >= 1.0);
+    } else if (barElement.current) {
+      barElement.current.style.width = "0px";
     }
   }, [progress, error]);
 
@@ -58,12 +58,26 @@ export default function TransferSelection({
     });
   };
 
-  const addNonDuplicateFiles = (files) => {
-    setSelectedFiles((prev) => {
-      const existing = new Set(prev.map((f) => `${f.name}-${f.size}`));
-      const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
-      return [...prev, ...unique];
-    });
+  const canReadFile = async (file) => {
+    try {
+      await file.slice(0, 1).arrayBuffer(); // Try to read 1 byte
+      return true;
+    } catch (e) {
+      return false;
+    }
+  };
+
+  const addNonDuplicateFiles = async (files) => {
+    const existing = new Set(selectedFiles.map((f) => `${f.name}-${f.size}`));
+    const unique = files.filter((f) => !existing.has(`${f.name}-${f.size}`));
+
+    let validFiles = [];
+    for (const file of unique) {
+      if (await canReadFile(file))
+        validFiles.push(file);
+    }
+
+    setSelectedFiles((prev) => [...prev, ...validFiles]);
   };
 
   const removeFile = (name) =>
@@ -94,6 +108,7 @@ export default function TransferSelection({
                 <label className="custom-checkbox">
                   <input
                     type="checkbox" className="checkbox"
+                    checked={selectedPeers.includes(name)}
                     onChange={(event) => selectPeer(event, name)} />
                   <span className="fake-checkbox"></span>
                 </label>

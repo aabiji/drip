@@ -112,6 +112,7 @@ class Session {
 
     if (!json.accepted) {
       await this.cancel(addError);
+      this.hadError = true;
       addError(`${response.senderId} does not allow the transfer`);
       return;
     }
@@ -142,6 +143,7 @@ export default function TransferView() {
   useEffect(() => {
     if (sending) {
       CURRENT_SESSION = new Session(selectedFiles, selectedPeers, setTransferIds);
+      console.log("set", CURRENT_SESSION);
       CURRENT_SESSION.requestAuthorization(addError);
     } else {
       CURRENT_SESSION = undefined;
@@ -199,6 +201,7 @@ export default function TransferView() {
 
           <div className="progress-container">
             {transferIds.map(id => {
+              if (CURRENT_SESSION === undefined) return null;
               const t = CURRENT_SESSION.transfers[id];
               if (t === undefined) return null;
               return <FileEntry key={id} name={t.file.name} error={t.hadError}

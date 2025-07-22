@@ -17,15 +17,11 @@ type App struct {
 }
 
 func NewApp() *App {
-	downloader := p2p.NewDownloader()
 	events := make(chan p2p.Message, 25)
 	finder := p2p.NewPeerFinder(true, events)
-
-	return &App{
-		events:     events,
-		downloader: downloader,
-		finder:     &finder,
-	}
+	a := &App{events: events, finder: &finder}
+	a.downloader = p2p.NewDownloader(a.AuthorizePeer, a.SignalSessionCompletion)
+	return a
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -54,9 +50,35 @@ func (a *App) shutdown(ctx context.Context) {
 	close(a.events)
 }
 
-func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
+func (a *App) AuthorizePeer(peer string) bool {
+	result, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+		Type:          runtime.QuestionDialog,
+		Title:         "Transfer authorization",
+		Message:       fmt.Sprintf("Allow %s to send you some files?", peer),
+		DefaultButton: "Yes",
+		Buttons:       []string{"Yes", "No"},
+	})
+	if err != nil {
+		panic(err)
+	}
+	return result == "Yes"
+}
+
+func (a *App) SignalSessionCompletion(peer string, numReceived int) {
+	_, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
+		Type:    runtime.InfoDialog,
+		Title:   "Transfer received",
+		Message: fmt.Sprintf("Received %d files from peer %s", numReceived, peer),
+		Buttons: []string{"Ok"},
+	})
+	if err != nil {
+		panic(err)
+	}
+}
 
 // the following functions are exported to the frontend
+func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
+
 func (a *App) RequestSessionAuth(info p2p.SessionInfo) error {
 	msg := p2p.NewMessage(p2p.SESSION_INFO, info)
 	for _, peerId := range info.Recipients {

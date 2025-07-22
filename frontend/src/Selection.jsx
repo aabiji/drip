@@ -35,6 +35,7 @@ export function FileEntry({ name, progress, onClick, recipient, error }) {
   );
 }
 
+// TODO: select all the files inside a folder
 export default function TransferSelection({
   setSending, selectedPeers, setSelectedPeers,
   selectedFiles, setSelectedFiles

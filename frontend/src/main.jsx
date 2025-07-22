@@ -11,7 +11,7 @@ import { ReactComponent as BackIcon } from "./assets/back.svg";
 import "./style.css";
 
 function App() {
-  const Views = { Transfer: 0, Authorize: 1, Received: 2, Settings: 3 };
+  const Views = { Transfer: 0,  Settings: 3 };
   const [view, setView] = useState(Views.Transfer);
 
   return (
@@ -26,25 +26,6 @@ function App() {
         <button onClick={() => setView(Views.Transfer)} className="back-button">
           <BackIcon class="settings-icon" />
         </button>
-      }
-
-      {view == Views.Authorize &&
-        <div className="content">
-          <h2>So and so wants to send you some files</h2>
-          <div className="options">
-            <button className="accept">Accept</button>
-            <button className="decline">Reject</button>
-          </div>
-        </div>
-      }
-
-      {view == Views.Received &&
-        <div className="content">
-          <h2>Received 10 files</h2>
-          <div className="options">
-            <button className="ok">Open</button>
-          </div>
-        </div>
       }
 
       {view == Views.Transfer && <TransferView />}

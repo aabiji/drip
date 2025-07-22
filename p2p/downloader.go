@@ -21,7 +21,8 @@ type Transfer struct {
 	Recipient  string `json:"recipient"`
 	FileSize   int64  `json:"size"`
 
-	file mmap.MMap
+	file   mmap.MMap
+	closed bool
 }
 
 type SessionInfo struct {
@@ -43,14 +44,29 @@ type SessionResponse struct {
 	Accepted  bool   `json:"accepted"`
 }
 
+func (t *Transfer) Close() {
+	if !t.closed {
+		if err := t.file.Unmap(); err != nil {
+			panic(err)
+		}
+		t.closed = true
+	}
+}
+
 type Downloader struct {
 	downloadFolder string
 	transfers      map[string]*Transfer
 	mutex          sync.Mutex // guards transfers
 	sessions       map[string]SessionInfo
+
+	authorizeCallback func(string) bool
+	notifyCallback    func(string, int)
 }
 
-func NewDownloader() *Downloader {
+func NewDownloader(
+	authorizeCallback func(string) bool,
+	notifyCallback func(string, int),
+) *Downloader {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		panic(err)
@@ -60,13 +76,16 @@ func NewDownloader() *Downloader {
 		transfers:      make(map[string]*Transfer),
 		sessions:       make(map[string]SessionInfo),
 		downloadFolder: path.Join(home, "Downloads"),
+
+		authorizeCallback: authorizeCallback,
+		notifyCallback:    notifyCallback,
 	}
 }
 
 func (d *Downloader) Close() {
 	for _, transfer := range d.transfers {
 		transfer.file.Flush()
-		transfer.file.Unmap()
+		transfer.Close()
 	}
 }
 
@@ -105,9 +124,15 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 }
 
 func (d *Downloader) receiveInfo(info SessionInfo) *Message {
-	// TODO: ask for user confirmation
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
+
+	response := SessionResponse{SessionId: info.SessionId, Accepted: false}
+	authorized := d.authorizeCallback(info.Sender)
+	if !authorized {
+		msg := NewMessage(string(SESSSION_RESPONSE), response)
+		return &msg
+	}
 
 	d.sessions[info.SessionId] = info
 	for _, t := range info.Transfers {
@@ -127,13 +152,11 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 			FileSize:   t.FileSize,
 			file:       contents,
 		}
-		log.Println("Set ", t.TransferId)
 		d.transfers[t.TransferId] = transfer
 	}
 
-	msg := NewMessage(SESSSION_RESPONSE, SessionResponse{
-		SessionId: info.SessionId, Accepted: true,
-	})
+	response.Accepted = true
+	msg := NewMessage(string(SESSSION_RESPONSE), response)
 	return &msg
 }
 
@@ -160,7 +183,7 @@ func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
 
 	// last chunk, done writing
 	if chunk.Offset+chunkSize >= transfer.FileSize {
-		transfer.file.Unmap()
+		transfer.Close()
 		log.Printf("Downloaded %s\n", chunk.TransferId)
 	}
 	return nil
@@ -176,9 +199,7 @@ func (d *Downloader) receiveCancel(sessionId string) *Message {
 		}
 
 		transfer := d.transfers[transferCopy.TransferId]
-		if err := transfer.file.Unmap(); err != nil {
-			panic(err)
-		}
+		transfer.Close()
 
 		fullpath := path.Join(d.downloadFolder, transfer.TransferId)
 		if err := os.Remove(fullpath); err != nil {

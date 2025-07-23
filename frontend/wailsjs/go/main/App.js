@@ -14,8 +14,20 @@ export function GetPeers() {
   return window['go']['main']['App']['GetPeers']();
 }
 
+export function GetSettings() {
+  return window['go']['main']['App']['GetSettings']();
+}
+
 export function RequestSessionAuth(arg1) {
   return window['go']['main']['App']['RequestSessionAuth'](arg1);
+}
+
+export function SaveSettings(arg1) {
+  return window['go']['main']['App']['SaveSettings'](arg1);
+}
+
+export function SelectDowloadFolder() {
+  return window['go']['main']['App']['SelectDowloadFolder']();
 }
 
 export function SendFileChunk(arg1) {

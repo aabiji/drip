@@ -5,6 +5,7 @@ import (
 	"os"
 	"path"
 	"sync"
+	"syscall"
 
 	"github.com/edsrzf/mmap-go"
 )
@@ -54,29 +55,25 @@ func (t *Transfer) Close() {
 }
 
 type Downloader struct {
-	downloadFolder string
-	transfers      map[string]*Transfer
-	mutex          sync.Mutex // guards transfers
-	sessions       map[string]SessionInfo
+	transfers map[string]*Transfer
+	mutex     sync.Mutex // guards transfers
+	sessions  map[string]SessionInfo
 
+	downloadFolder    *string
 	authorizeCallback func(string) bool
 	notifyCallback    func(string, int)
 }
 
 func NewDownloader(
+	downloadFolder *string,
 	authorizeCallback func(string) bool,
 	notifyCallback func(string, int),
 ) *Downloader {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-
 	return &Downloader{
-		transfers:      make(map[string]*Transfer),
-		sessions:       make(map[string]SessionInfo),
-		downloadFolder: path.Join(home, "Downloads"),
+		transfers: make(map[string]*Transfer),
+		sessions:  make(map[string]SessionInfo),
 
+		downloadFolder:    downloadFolder,
 		authorizeCallback: authorizeCallback,
 		notifyCallback:    notifyCallback,
 	}
@@ -123,6 +120,39 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 	return nil
 }
 
+// linux specific syscall to allocate the size of a file
+// TODO: implement version for other operating systems
+func fallocate(file *os.File, offset int64, length int64) error {
+	if length == 0 {
+		return nil
+	}
+	return syscall.Fallocate(int(file.Fd()), 0, offset, length)
+}
+
+func OpenFile(path string, size int64) (mmap.MMap, error) {
+	// TODO: should be able to create the file with
+	// the same file permissions as the sender -- how to do in os-agnostic way?
+	// the permission should be applied after all the file contents have been recived
+	exists := true
+	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
+	if os.IsNotExist(err) {
+		exists = false
+	} else if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	if !exists {
+		err = fallocate(file, 0, size)
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	fileData, err := mmap.Map(file, mmap.RDWR, 0)
+	return fileData, err
+}
+
 func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
@@ -140,7 +170,7 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 			continue // not for us
 		}
 
-		fullpath := path.Join(d.downloadFolder, t.TransferId)
+		fullpath := path.Join(*d.downloadFolder, t.TransferId)
 		contents, err := OpenFile(fullpath, t.FileSize)
 		if err != nil {
 			panic(err)
@@ -226,7 +256,7 @@ func (d *Downloader) receiveCancel(sessionId string) *Message {
 		transfer := d.transfers[transferCopy.TransferId]
 		transfer.Close()
 
-		fullpath := path.Join(d.downloadFolder, transfer.TransferId)
+		fullpath := path.Join(*d.downloadFolder, transfer.TransferId)
 		if err := os.Remove(fullpath); err != nil {
 			panic(err)
 		}

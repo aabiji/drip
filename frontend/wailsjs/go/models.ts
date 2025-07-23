@@ -1,3 +1,26 @@
+export namespace main {
+	
+	export class Settings {
+	    theme: string;
+	    trustPeers: boolean;
+	    showNotifications: boolean;
+	    downloadFolder: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Settings(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.theme = source["theme"];
+	        this.trustPeers = source["trustPeers"];
+	        this.showNotifications = source["showNotifications"];
+	        this.downloadFolder = source["downloadFolder"];
+	    }
+	}
+
+}
+
 export namespace p2p {
 	
 	export class SessionCancel {

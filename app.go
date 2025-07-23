@@ -2,11 +2,56 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"os"
+	"path"
+	"strings"
 
 	"github.com/aabiji/drip/p2p"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
+
+type Settings struct {
+	Theme             string `json:"theme"`
+	TrustPeers        bool   `json:"trustPeers"`
+	ShowNotifications bool   `json:"showNotifications"`
+	DownloadFolder    string `json:"downloadFolder"`
+}
+
+func loadSettings(configPath string) Settings {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+	defaultFolder := path.Join(home, "Downloads")
+
+	settings := Settings{
+		Theme:             "light",
+		TrustPeers:        true,
+		ShowNotifications: true,
+		DownloadFolder:    defaultFolder,
+	}
+
+	file, err := os.Open(configPath)
+	if os.IsNotExist(err) {
+		return settings // return defaults if there's no settings file
+	} else if err != nil {
+		panic(err)
+	}
+	defer file.Close()
+
+	contents, _ := io.ReadAll(file)
+	if err := json.Unmarshal(contents, &settings); err != nil {
+		panic(err)
+	}
+
+	if len(strings.TrimSpace(settings.DownloadFolder)) == 0 {
+		settings.DownloadFolder = defaultFolder
+	}
+	return settings
+}
 
 type App struct {
 	ctx    context.Context
@@ -14,14 +59,26 @@ type App struct {
 
 	finder     *p2p.PeerFinder
 	downloader *p2p.Downloader
+
+	configPath string
+	settings   Settings
 }
 
 func NewApp() *App {
 	events := make(chan p2p.Message, 25)
 	finder := p2p.NewPeerFinder(true, events)
-	a := &App{events: events, finder: &finder}
-	a.downloader = p2p.NewDownloader(a.AuthorizePeer, a.SignalSessionCompletion)
-	return a
+	configPath := "drip-settings.json"
+	settings := loadSettings(configPath)
+	app := &App{
+		events:     events,
+		finder:     &finder,
+		configPath: configPath,
+		settings:   settings,
+	}
+	app.downloader = p2p.NewDownloader(
+		&app.settings.DownloadFolder,
+		app.AuthorizePeer, app.SignalSessionCompletion)
+	return app
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -43,6 +100,16 @@ func (a *App) startup(ctx context.Context) {
 }
 
 func (a *App) shutdown(ctx context.Context) {
+	// save the settings
+	jsonData, err := json.Marshal(a.settings)
+	if err != nil {
+		panic(err)
+	}
+	if err := os.WriteFile(a.configPath, jsonData, 0644); err != nil {
+		panic(err)
+	}
+
+	// shutdown services
 	a.downloader.Close()
 	for _, peer := range a.finder.Peers {
 		peer.Close()
@@ -79,6 +146,9 @@ func (a *App) SignalSessionCompletion(peer string, numReceived int) {
 // the following functions are exported to the frontend
 func (a *App) GetPeers() []string { return a.finder.GetConnectedPeers() }
 
+func (a *App) GetSettings() Settings          { return a.settings }
+func (a *App) SaveSettings(settings Settings) { a.settings = settings }
+
 func (a *App) RequestSessionAuth(info p2p.SessionInfo) error {
 	msg := p2p.NewMessage(p2p.SESSION_INFO, info)
 	for _, peerId := range info.Recipients {
@@ -110,4 +180,20 @@ func (a *App) CancelSession(signal p2p.SessionCancel) error {
 		}
 	}
 	return nil
+}
+
+func (a *App) SelectDowloadFolder() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		panic(err)
+	}
+
+	path, err := runtime.OpenDirectoryDialog(a.ctx,
+		runtime.OpenDialogOptions{DefaultDirectory: home})
+	if len(path) == 0 || err != nil { // user didn't select anything
+		return a.settings.DownloadFolder
+	}
+
+	a.settings.DownloadFolder = path
+	return path
 }

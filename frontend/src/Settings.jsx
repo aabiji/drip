@@ -1,19 +1,22 @@
-import { useContext, useState } from "react";
-import { ThemeContext } from "./State";
-
+import { useContext } from "react";
+import { SettingsContext } from "./State";
+import { SelectDowloadFolder } from "../wailsjs/go/main/App";
 import { Moon, Sun } from "feather-icons-react";
 
 export default function SettingsView() {
+  const {
+      theme, setTheme,
+      trustPeers, setTrustPeers,
+      showNotifications, setShowNotifications,
+      downloadFolder, setDownloadFolder
+  } = useContext(SettingsContext);
+
+  const pickDownloadPath = async () => setDownloadFolder(await SelectDowloadFolder());
+
   const startYear = 2025;
   const currentYear = new Date().getFullYear();
   const copyright =
     startYear == currentYear ? `${startYear}` : `${startYear}-${currentYear}`;
-
-  const [downloadPath, _setDownloadPath] = useState("~/Downloads/");
-  const [trustPeers, setTrustPeers] = useState(true);
-  const [showPopups, setShowPopups] = useState(false);
-
-  const { theme, setTheme } = useContext(ThemeContext);
 
   return (
     <div className="content">
@@ -35,27 +38,25 @@ export default function SettingsView() {
         <label className="custom-checkbox">
           <input
             type="checkbox" className="checkbox"
-            onChange={(event) => setTrustPeers(!trustPeers)} />
+            onChange={() => setTrustPeers(!trustPeers)} />
           <span className="fake-checkbox"></span>
         </label>
       </div>
 
       <div className="row">
-        <p>Show popups</p>
+        <p>Show notifications</p>
         <label className="custom-checkbox">
           <input
             type="checkbox" className="checkbox"
-            onChange={(event) => setShowPopups(!showPopups)} />
+            onChange={() => setShowNotifications(!showNotifications)} />
           <span className="fake-checkbox"></span>
         </label>
       </div>
 
       <div className="row">
-        <p className="input-label">Download folder</p>
-        <label className="folder-label">
-          <p className="path">{downloadPath}</p>
-          <input type="file" webkitdirectory="true" className="folder-path-input" />
-        </label>
+        <p>Download folder</p>
+        <button class="folder-path-input"
+          onClick={() => pickDownloadPath()}>{downloadFolder}</button>
       </div>
 
       <p className="copyright">Made with ❤️ by Abigail Adegbiji {copyright}</p>

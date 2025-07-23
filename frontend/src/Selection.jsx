@@ -109,7 +109,6 @@ export default function TransferSelection({
                 <label className="custom-checkbox">
                   <input
                     type="checkbox" className="checkbox"
-                    multiple webkitdirectory
                     checked={selectedPeers.includes(name)}
                     onChange={(event) => selectPeer(event, name)} />
                   <span className="fake-checkbox"></span>
@@ -131,7 +130,7 @@ export default function TransferSelection({
           <label className="file-label">
             <Upload className="upload-icon" />
             <p>Choose or drag and drop files</p>
-            <input type="file"
+            <input type="file" multiple webkitdirectory
                 onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
           </label>
         </div>

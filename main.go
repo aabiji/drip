@@ -22,7 +22,7 @@ func main() {
 		OnStartup:         app.startup,
 		OnShutdown:        app.shutdown,
 		Bind:              []any{app},
-		HideWindowOnClose: true,
+		HideWindowOnClose: false,
 	})
 
 	if err != nil {

@@ -1,32 +1,26 @@
 import { createContext, useEffect, useState } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
-import { GetPeers } from "../wailsjs/go/main/App";
+import { GetPeers, GetSettings, SaveSettings } from "../wailsjs/go/main/App";
 
 export const PeersContext = createContext([]);
 export const ErrorContext = createContext([]);
-export const ThemeContext = createContext("light");
+export const SettingsContext = createContext({});
 export const TransferContext = createContext(null);
 
 export default function State({ children }) {
-  // Periodically fetch list of peers from the backend
+  // periodically fetch list of peers from the backend
   const [peers, setPeers] = useState([]);
   useEffect(() => {
     EventsOn("PEERS_UPDATED", () => GetPeers().then((names) => setPeers(names)));
   }, []);
 
-  // TODO: save to disk
-  const defaultLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-  const [theme, setTheme] = useState(defaultLight ? "light" : "dark");
-
-  useEffect(() => {
-    document.documentElement.setAttribute("data-theme", theme);
-  }, [theme]);
-
+  // transfer info
   const [selectedPeers, setSelectedPeers] = useState([]);
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [transferIds, setTransferIds] = useState([]);
   const [sending, setSending] = useState(false);
 
+  // error system
   const [errors, setErrors] = useState([]);
 
   const addError = (message) =>
@@ -35,8 +29,39 @@ export default function State({ children }) {
   const removeError = (id) =>
     setErrors(prev => prev.filter(error => error.id !== id));
 
+  // settings
+  let loaded = false;
+  const [theme, setTheme] = useState("light");
+  const [trustPeers, setTrustPeers] = useState(true);
+  const [showNotifications, setShowNotifications] = useState(true);
+  const [downloadFolder, setDownloadFolder] = useState("");
+
+  useEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+  }, [theme]);
+
+  useEffect(() => {
+    if (!loaded) return;
+    SaveSettings({ theme, trustPeers, showNotifications, downloadFolder });
+  }, [theme, trustPeers, showNotifications, downloadFolder]);
+
+  useEffect(() => {
+    (async () => {
+      const settings = await GetSettings();
+      setTheme(settings.theme);
+      setTrustPeers(settings.trustPeers);
+      setShowNotifications(settings.showNotifications);
+      setDownloadFolder(settings.downloadFolder);
+      loaded = true;
+    })();
+  }, []);
+
   return (
-    <ThemeContext.Provider value={{ theme, setTheme }}>
+    <SettingsContext.Provider value={{
+      theme, setTheme, trustPeers, setTrustPeers,
+      showNotifications, setShowNotifications,
+      downloadFolder, setDownloadFolder
+      }}>
       <ErrorContext.Provider value={{ errors, addError, removeError }}>
         <PeersContext.Provider value={peers}>
           <TransferContext.Provider
@@ -50,6 +75,6 @@ export default function State({ children }) {
           </TransferContext.Provider>
         </PeersContext.Provider>
       </ErrorContext.Provider>
-    </ThemeContext.Provider>
+    </SettingsContext.Provider>
   );
 }

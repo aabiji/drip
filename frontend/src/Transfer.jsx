@@ -1,15 +1,18 @@
 import { useContext, useEffect, useState } from "react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
-import { // see downloader.go for the json schemas to these function arguments
-  CancelSession, RequestSessionAuth, SendFileChunk
+import {
+  // see downloader.go for the json schemas to these function arguments
+  CancelSession,
+  RequestSessionAuth,
+  SendFileChunk,
 } from "../wailsjs/go/main/App";
 
 import { ErrorContext, TransferContext } from "./State";
 import TransferSelection, { FileEntry } from "./Selection";
 
 function randomizeFilename(filename) {
-  const parts = filename.split('.');
+  const parts = filename.split(".");
   const [base, extension] = [parts[0], parts[parts.length - 1]];
   const random6DigitNum = Math.floor(100000 + Math.random() * 900000);
   return `${base}-${random6DigitNum}.${extension}`;
@@ -45,7 +48,7 @@ class Transfer {
         });
 
         this.amountSent += value.length;
-        setTransferIds(prev => [...prev]); // force react to rerender
+        setTransferIds((prev) => [...prev]); // force react to rerender
       } catch (error) {
         this.hadError = true;
         addError(error.toString());
@@ -71,26 +74,33 @@ class Session {
       for (const peer of recipients) {
         const transferId = randomizeFilename(file.name);
         const copy = new File([file], transferId, { type: file.type });
-        this.transfers[transferId] = new Transfer(copy, transferId, this.id, peer);
+        this.transfers[transferId] = new Transfer(
+          copy,
+          transferId,
+          this.id,
+          peer,
+        );
       }
     }
     setTransferIds(Object.keys(this.transfers));
   }
 
   // return true if all the recipients have authorized the batch of transfers
-  fullyAuthorized() { return Object.values(this.recipients).every(Boolean); }
+  fullyAuthorized() {
+    return Object.values(this.recipients).every(Boolean);
+  }
 
   async requestAuthorization() {
     try {
       await RequestSessionAuth({
         sessionId: this.id,
         recipients: Object.keys(this.recipients),
-        transfers: Object.values(this.transfers).map(t => ({
+        transfers: Object.values(this.transfers).map((t) => ({
           sessionId: this.id,
           transferId: t.id,
           recipient: t.recipient,
           size: t.file.size,
-        }))
+        })),
       });
     } catch (error) {
       this.hadError = true;
@@ -101,7 +111,8 @@ class Session {
   async cancel(addError) {
     try {
       await CancelSession({
-        sessionId: this.id, recipients: Object.keys(this.recipients)
+        sessionId: this.id,
+        recipients: Object.keys(this.recipients),
       });
     } catch (error) {
       this.hadError = true;
@@ -133,10 +144,14 @@ let CURRENT_SESSION = undefined;
 
 export default function TransferView() {
   const {
-    sending, setSending,
-    transferIds, setTransferIds,
-    selectedPeers, setSelectedPeers,
-    selectedFiles, setSelectedFiles
+    sending,
+    setSending,
+    transferIds,
+    setTransferIds,
+    selectedPeers,
+    setSelectedPeers,
+    selectedFiles,
+    setSelectedFiles,
   } = useContext(TransferContext);
 
   const { addError } = useContext(ErrorContext);
@@ -144,7 +159,11 @@ export default function TransferView() {
 
   useEffect(() => {
     if (sending) {
-      CURRENT_SESSION = new Session(selectedFiles, selectedPeers, setTransferIds);
+      CURRENT_SESSION = new Session(
+        selectedFiles,
+        selectedPeers,
+        setTransferIds,
+      );
       console.log("set", CURRENT_SESSION);
       CURRENT_SESSION.requestAuthorization(addError);
     } else {
@@ -171,20 +190,27 @@ export default function TransferView() {
 
   return (
     <div className="content">
-      {!sending &&
+      {!sending && (
         <TransferSelection
           setSending={setSending}
-          selectedPeers={selectedPeers} setSelectedPeers={setSelectedPeers}
-          selectedFiles={selectedFiles} setSelectedFiles={setSelectedFiles} />}
+          selectedPeers={selectedPeers}
+          setSelectedPeers={setSelectedPeers}
+          selectedFiles={selectedFiles}
+          setSelectedFiles={setSelectedFiles}
+        />
+      )}
 
-      {sending &&
+      {sending && (
         <div className="content">
           {(() => {
             if (CURRENT_SESSION === undefined) return null;
             const authorized = CURRENT_SESSION.fullyAuthorized();
-            const done = Object.values(CURRENT_SESSION.transfers).every(t => t.done);
-            const failed = CURRENT_SESSION.hadError ||
-              Object.values(CURRENT_SESSION.transfers).some(t => t.hadError);
+            const done = Object.values(CURRENT_SESSION.transfers).every(
+              (t) => t.done,
+            );
+            const failed =
+              CURRENT_SESSION.hadError ||
+              Object.values(CURRENT_SESSION.transfers).some((t) => t.hadError);
 
             let msg = "Sending";
             if (failed) msg = "Sending failed";
@@ -193,7 +219,9 @@ export default function TransferView() {
 
             return (
               <div className="status-top-row">
-                <button onClick={() => done ? setSending(false) : setCancel(true)}>
+                <button
+                  onClick={() => (done ? setSending(false) : setCancel(true))}
+                >
                   {done || failed ? "Back" : "Cancel"}
                 </button>
                 <h1>{msg}</h1>
@@ -202,16 +230,23 @@ export default function TransferView() {
           })()}
 
           <div className="progress-container">
-            {transferIds.map(id => {
+            {transferIds.map((id) => {
               if (CURRENT_SESSION === undefined) return null;
               const t = CURRENT_SESSION.transfers[id];
               if (t === undefined) return null;
-              return <FileEntry key={id} name={t.file.name} error={t.hadError}
-                        recipient={t.recipient} progress={t.amountSent / t.file.size} />;
+              return (
+                <FileEntry
+                  key={id}
+                  name={t.file.name}
+                  error={t.hadError}
+                  recipient={t.recipient}
+                  progress={t.amountSent / t.file.size}
+                />
+              );
             })}
           </div>
         </div>
-      }
+      )}
     </div>
   );
 }

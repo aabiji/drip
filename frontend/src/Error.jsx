@@ -21,17 +21,21 @@ export default function ErrorTray() {
 
   return (
     <div className="error-tray">
-      {errors.slice(0, maxVisible).reverse().map((error, index) => (
-        <div
-          key={error.id}
-          className={`error-message ${removingIndexes.has(error.id) ? "removing" : ""}`}
-          style={{ zIndex: maxVisible - index }}>
-          <p>{error.message}</p>
-          <button className="error-button" onClick={() => remove(error.id)}>
-            <X className="error-icon" />
-          </button>
-        </div>
-      ))}
+      {errors
+        .slice(0, maxVisible)
+        .reverse()
+        .map((error, index) => (
+          <div
+            key={error.id}
+            className={`error-message ${removingIndexes.has(error.id) ? "removing" : ""}`}
+            style={{ zIndex: maxVisible - index }}
+          >
+            <p>{error.message}</p>
+            <button className="error-button" onClick={() => remove(error.id)}>
+              <X className="error-icon" />
+            </button>
+          </div>
+        ))}
     </div>
   );
 }

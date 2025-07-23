@@ -11,22 +11,25 @@ import { Settings, ArrowLeft } from "feather-icons-react";
 import "./style.css";
 
 function App() {
-  const Views = { Transfer: 0,  Settings: 3 };
+  const Views = { Transfer: 0, Settings: 3 };
   const [view, setView] = useState(Views.Transfer);
 
   return (
     <div className="app-wrapper">
-      {view == Views.Transfer &&
-        <button onClick={() => setView(Views.Settings)} className="settings-button">
+      {view == Views.Transfer && (
+        <button
+          onClick={() => setView(Views.Settings)}
+          className="settings-button"
+        >
           <Settings className="settings-icon" />
         </button>
-      }
+      )}
 
-      {view == Views.Settings &&
+      {view == Views.Settings && (
         <button onClick={() => setView(Views.Transfer)} className="back-button">
           <ArrowLeft class="settings-icon" />
         </button>
-      }
+      )}
 
       {view == Views.Transfer && <TransferView />}
       {view == Views.Settings && <SettingsView />}

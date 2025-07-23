@@ -7,7 +7,7 @@ export function FileEntry({ name, progress, onClick, recipient, error }) {
   const barElement = useRef();
   const [full, setFull] = useState(false);
   const [msg, setMsg] = useState(
-    recipient !== undefined ? `Sending ${name} to ${recipient}` : name
+    recipient !== undefined ? `Sending ${name} to ${recipient}` : name,
   );
 
   useEffect(() => {
@@ -25,19 +25,28 @@ export function FileEntry({ name, progress, onClick, recipient, error }) {
   }, [progress, error]);
 
   return (
-    <div className={full ? "file-entry full" : error ? "file-entry error" : "file-entry"}>
+    <div
+      className={
+        full ? "file-entry full" : error ? "file-entry error" : "file-entry"
+      }
+    >
       <div className="inner">
         <p>{msg}</p>
         {onClick !== undefined && <button onClick={onClick}>x</button>}
       </div>
-      {progress !== undefined && <div className="progress-bar" ref={barElement}></div>}
+      {progress !== undefined && (
+        <div className="progress-bar" ref={barElement}></div>
+      )}
     </div>
   );
 }
 
 export default function TransferSelection({
-  setSending, selectedPeers, setSelectedPeers,
-  selectedFiles, setSelectedFiles
+  setSending,
+  selectedPeers,
+  setSelectedPeers,
+  selectedFiles,
+  setSelectedFiles,
 }) {
   const peers = useContext(PeersContext);
   const [havePeers, setHavePeers] = useState(false);
@@ -73,8 +82,7 @@ export default function TransferSelection({
 
     let validFiles = [];
     for (const file of unique) {
-      if (await canReadFile(file))
-        validFiles.push(file);
+      if (await canReadFile(file)) validFiles.push(file);
     }
 
     setSelectedFiles((prev) => [...prev, ...validFiles]);
@@ -83,7 +91,9 @@ export default function TransferSelection({
   const removeFile = (name) =>
     setSelectedFiles((prev) => prev.filter((f) => f.name != name));
 
-  const dragOverHandler = (event) => { event.preventDefault(); }
+  const dragOverHandler = (event) => {
+    event.preventDefault();
+  };
 
   const traverseEntry = (entry) => {
     return new Promise((resolve) => {
@@ -108,7 +118,7 @@ export default function TransferSelection({
         readEntries();
       }
     });
-  }
+  };
 
   const dropHandler = async (event) => {
     event.preventDefault();
@@ -140,9 +150,11 @@ export default function TransferSelection({
               <div className="peer-entry" key={index}>
                 <label className="custom-checkbox">
                   <input
-                    type="checkbox" className="checkbox"
+                    type="checkbox"
+                    className="checkbox"
                     checked={selectedPeers.includes(name)}
-                    onChange={(event) => selectPeer(event, name)} />
+                    onChange={(event) => selectPeer(event, name)}
+                  />
                   <span className="fake-checkbox"></span>
                 </label>
                 <p>{name}</p>
@@ -158,22 +170,37 @@ export default function TransferSelection({
         <div
           className="file-input-container"
           onDrop={(event) => dropHandler(event)}
-          onDragOver={(event) => dragOverHandler(event)}>
+          onDragOver={(event) => dragOverHandler(event)}
+        >
           <label className="file-label">
             <Upload className="upload-icon" />
             <p>Choose or drag and drop files</p>
-            <input type="file" multiple webkitdirectory="true"
-                onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
+            <input
+              type="file"
+              multiple
+              webkitdirectory="true"
+              onChange={(event) =>
+                addNonDuplicateFiles(Array.from(event.target.files))
+              }
+            />
           </label>
         </div>
         <div className="file-selection-container">
           {selectedFiles.map((file, index) => (
-            <FileEntry key={index} name={file.name} onClick={() => removeFile(file.name)} />
+            <FileEntry
+              key={index}
+              name={file.name}
+              onClick={() => removeFile(file.name)}
+            />
           ))}
         </div>
         <button
-          className="send-button" disabled={!canSend}
-          onClick={() => setSending(true)}>Send files</button>
+          className="send-button"
+          disabled={!canSend}
+          onClick={() => setSending(true)}
+        >
+          Send files
+        </button>
       </div>
     </div>
   );

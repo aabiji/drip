@@ -11,7 +11,9 @@ export default function State({ children }) {
   // periodically fetch list of peers from the backend
   const [peers, setPeers] = useState([]);
   useEffect(() => {
-    EventsOn("PEERS_UPDATED", () => GetPeers().then((names) => setPeers(names)));
+    EventsOn("PEERS_UPDATED", () =>
+      GetPeers().then((names) => setPeers(names)),
+    );
   }, []);
 
   // transfer info
@@ -24,10 +26,10 @@ export default function State({ children }) {
   const [errors, setErrors] = useState([]);
 
   const addError = (message) =>
-    setErrors(prev => [...prev, { id: crypto.randomUUID(), message }]);
+    setErrors((prev) => [...prev, { id: crypto.randomUUID(), message }]);
 
   const removeError = (id) =>
-    setErrors(prev => prev.filter(error => error.id !== id));
+    setErrors((prev) => prev.filter((error) => error.id !== id));
 
   // settings
   let loaded = false;
@@ -57,21 +59,33 @@ export default function State({ children }) {
   }, []);
 
   return (
-    <SettingsContext.Provider value={{
-      theme, setTheme, trustPeers, setTrustPeers,
-      showNotifications, setShowNotifications,
-      downloadFolder, setDownloadFolder
-      }}>
+    <SettingsContext.Provider
+      value={{
+        theme,
+        setTheme,
+        trustPeers,
+        setTrustPeers,
+        showNotifications,
+        setShowNotifications,
+        downloadFolder,
+        setDownloadFolder,
+      }}
+    >
       <ErrorContext.Provider value={{ errors, addError, removeError }}>
         <PeersContext.Provider value={peers}>
           <TransferContext.Provider
             value={{
-              sending, setSending,
-              transferIds, setTransferIds,
-              selectedPeers, setSelectedPeers,
-              selectedFiles, setSelectedFiles
-            }}>
-              {children}
+              sending,
+              setSending,
+              transferIds,
+              setTransferIds,
+              selectedPeers,
+              setSelectedPeers,
+              selectedFiles,
+              setSelectedFiles,
+            }}
+          >
+            {children}
           </TransferContext.Provider>
         </PeersContext.Provider>
       </ErrorContext.Provider>

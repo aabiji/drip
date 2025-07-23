@@ -11,13 +11,14 @@ import TransferSelection, { FileEntry } from "./Selection";
 function randomizeFilename(filename) {
   const parts = filename.split('.');
   const [base, extension] = [parts[0], parts[parts.length - 1]];
-  const random = crypto.randomUUID();
-  return `${base}-${random}.${extension}`;
+  const random6DigitNum = Math.floor(100000 + Math.random() * 900000);
+  return `${base}-${random6DigitNum}.${extension}`;
 }
 
 class Transfer {
-  constructor(file, id, recipient) {
+  constructor(file, id, sessionId, recipient) {
     this.id = id;
+    this.sessionId = sessionId;
     this.recipient = recipient;
     this.file = file;
     this.amountSent = 0;
@@ -70,7 +71,7 @@ class Session {
       for (const peer of recipients) {
         const transferId = randomizeFilename(file.name);
         const copy = new File([file], transferId, { type: file.type });
-        this.transfers[transferId] = new Transfer(copy, transferId, peer);
+        this.transfers[transferId] = new Transfer(copy, transferId, this.id, peer);
       }
     }
     setTransferIds(Object.keys(this.transfers));
@@ -85,9 +86,10 @@ class Session {
         sessionId: this.id,
         recipients: Object.keys(this.recipients),
         transfers: Object.values(this.transfers).map(t => ({
+          sessionId: this.id,
           transferId: t.id,
           recipient: t.recipient,
-          size: t.file.size
+          size: t.file.size,
         }))
       });
     } catch (error) {

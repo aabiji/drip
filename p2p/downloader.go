@@ -17,12 +17,14 @@ type TransferChunk struct {
 }
 
 type Transfer struct {
+	SessionId  string `json:"sessionId"`
 	TransferId string `json:"transferId"`
 	Recipient  string `json:"recipient"`
 	FileSize   int64  `json:"size"`
 
 	file   mmap.MMap
 	closed bool
+	done   bool
 }
 
 type SessionInfo struct {
@@ -30,8 +32,6 @@ type SessionInfo struct {
 	Recipients []string   `json:"recipients"`
 	Transfers  []Transfer `json:"transfers"`
 	Sender     string     `json:"sender,omitempty"`
-
-	done bool
 }
 
 type SessionCancel struct {
@@ -91,7 +91,7 @@ func (d *Downloader) Close() {
 
 func (d *Downloader) CancelSessions(disconnectedPeer string) {
 	for _, session := range d.sessions {
-		if session.Sender == disconnectedPeer && !session.done {
+		if session.Sender == disconnectedPeer {
 			d.receiveCancel(session.SessionId)
 		}
 	}
@@ -146,18 +146,44 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 			panic(err)
 		}
 
-		transfer := &Transfer{
-			TransferId: t.TransferId,
-			Recipient:  t.Recipient,
-			FileSize:   t.FileSize,
-			file:       contents,
-		}
-		d.transfers[t.TransferId] = transfer
+		t.file = contents
+		d.transfers[t.TransferId] = &t
 	}
 
 	response.Accepted = true
 	msg := NewMessage(string(SESSSION_RESPONSE), response)
 	return &msg
+}
+
+func (d *Downloader) handleTransferCompletion(transfer *Transfer) {
+	transfer.Close()
+	transfer.done = true
+
+	// check if all the tranfers associated to a session are complete
+	allDone := true
+	session := d.sessions[transfer.SessionId]
+	for _, transferCopy := range session.Transfers {
+		if transferCopy.Recipient != getDeviceName() {
+			continue // not for us
+		}
+
+		t := d.transfers[transferCopy.TransferId]
+		if !t.done {
+			allDone = false
+			break
+		}
+	}
+
+	if allDone {
+		// remove the session data from cache
+		for id := range d.transfers {
+			delete(d.transfers, id)
+		}
+		delete(d.sessions, session.SessionId)
+
+		// Notify the user
+		d.notifyCallback(session.Sender, len(session.Transfers))
+	}
 }
 
 func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
@@ -183,8 +209,7 @@ func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
 
 	// last chunk, done writing
 	if chunk.Offset+chunkSize >= transfer.FileSize {
-		transfer.Close()
-		log.Printf("Downloaded %s\n", chunk.TransferId)
+		d.handleTransferCompletion(transfer)
 	}
 	return nil
 }

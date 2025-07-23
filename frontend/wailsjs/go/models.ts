@@ -15,6 +15,7 @@ export namespace p2p {
 	    }
 	}
 	export class Transfer {
+	    sessionId: string;
 	    transferId: string;
 	    recipient: string;
 	    size: number;
@@ -25,6 +26,7 @@ export namespace p2p {
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.sessionId = source["sessionId"];
 	        this.transferId = source["transferId"];
 	        this.recipient = source["recipient"];
 	        this.size = source["size"];

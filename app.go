@@ -68,7 +68,7 @@ func (a *App) SignalSessionCompletion(peer string, numReceived int) {
 	_, err := runtime.MessageDialog(a.ctx, runtime.MessageDialogOptions{
 		Type:    runtime.InfoDialog,
 		Title:   "Transfer received",
-		Message: fmt.Sprintf("Received %d files from peer %s", numReceived, peer),
+		Message: fmt.Sprintf("Received %d files from %s", numReceived, peer),
 		Buttons: []string{"Ok"},
 	})
 	if err != nil {

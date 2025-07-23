@@ -22,7 +22,7 @@ func main() {
 		OnStartup:         app.startup,
 		OnShutdown:        app.shutdown,
 		Bind:              []any{app},
-		HideWindowOnClose: false, // TODO: set to true, also look at: https://wails.io/docs/reference/runtime/window/
+		HideWindowOnClose: true,
 	})
 
 	if err != nil {

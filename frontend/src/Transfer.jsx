@@ -219,18 +219,19 @@ export default function TransferView() {
             if (done) msg = "Done sending";
 
             return (
-              <div className="status-top-row">
+              <div>
                 <button
+                  className="fixed-button transparent-button"
                   onClick={() => (done ? setSending(false) : setCancel(true))}
                 >
-                  <ArrowLeft class="settings-icon" />
+                  <ArrowLeft className="icon" />
                 </button>
                 <h1>{msg}</h1>
               </div>
             );
           })()}
 
-          <div className="progress-container">
+          <div>
             {transferIds.map((id) => {
               if (CURRENT_SESSION === undefined) return null;
               const t = CURRENT_SESSION.transfers[id];

@@ -32,9 +32,9 @@ export default function SettingsView() {
           onClick={() => setTheme(theme == "light" ? "dark" : "light")}
         >
           {theme == "light" ? (
-            <Moon className="icon-button-svg" />
+            <Moon className="icon" />
           ) : (
-            <Sun className="icon-button-svg" />
+            <Sun className="icon" />
           )}
         </button>
       </div>
@@ -67,7 +67,7 @@ export default function SettingsView() {
 
       <div className="row">
         <p>Download folder</p>
-        <button class="folder-path-input" onClick={() => pickDownloadPath()}>
+        <button className="folder-path-input" onClick={() => pickDownloadPath()}>
           {downloadFolder}
         </button>
       </div>

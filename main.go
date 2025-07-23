@@ -11,6 +11,15 @@ import (
 //go:embed all:frontend/dist
 var assets embed.FS
 
+/*
+- Make transfers significantly faster
+- Handle errors in the backend
+- Add app logging to file
+- Completely efactor the backend implementation
+- Port to android
+- Fix bugs
+*/
+
 func main() {
 	app := NewApp()
 

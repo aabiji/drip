@@ -1,11 +1,12 @@
 import { useContext, useEffect, useState, useRef } from "react";
-import { Upload } from "feather-icons-react";
 
 import { PeersContext } from "./State";
 
+import { Upload, X } from "feather-icons-react";
+import { PuffLoader } from "react-spinners";
+
 export function FileEntry({ name, progress, onClick, recipient, error }) {
   const barElement = useRef();
-  const [full, setFull] = useState(false);
   const [msg, setMsg] = useState(
     recipient !== undefined ? `Sending ${name} to ${recipient}` : name,
   );
@@ -18,22 +19,18 @@ export function FileEntry({ name, progress, onClick, recipient, error }) {
 
     if (progress !== undefined && progress > 0) {
       barElement.current.style.width = `${Math.min(progress, 1.0) * 100}%`;
-      setFull(progress >= 1.0);
     } else if (barElement.current) {
       barElement.current.style.width = "0px";
     }
   }, [progress, error]);
 
   return (
-    <div
-      className={
-        full ? "file-entry full" : error ? "file-entry error" : "file-entry"
-      }
-    >
-      <div className="inner">
-        <p>{msg}</p>
-        {onClick !== undefined && <button onClick={onClick}>x</button>}
-      </div>
+    <div className={error ? "file-entry error" : "file-entry"}>
+      <p>{msg}</p>
+      {onClick !== undefined &&
+        <button className="transparent-button" onClick={onClick}>
+          <X className="icon" />
+        </button>}
       {progress !== undefined && (
         <div className="progress-bar" ref={barElement}></div>
       )}
@@ -162,7 +159,10 @@ export default function TransferSelection({
             ))}
           </div>
         ) : (
-          <p> There are no devices around to connect to </p>
+          <div className="loader-row">
+            <PuffLoader color="#007aff" loading={true} size={35} />
+            <p> Searching for peers </p>
+          </div>
         )}
       </div>
 
@@ -194,11 +194,8 @@ export default function TransferSelection({
             />
           ))}
         </div>
-        <button
-          className="send-button"
-          disabled={!canSend}
-          onClick={() => setSending(true)}
-        >
+        <button className="send-button"
+          disabled={!canSend} onClick={() => setSending(true)}>
           Send files
         </button>
       </div>

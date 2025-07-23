@@ -1,4 +1,5 @@
 import { useContext, useEffect, useState } from "react";
+import { ArrowLeft } from "feather-icons-react";
 import { EventsOn } from "../wailsjs/runtime/runtime";
 
 import {
@@ -222,7 +223,7 @@ export default function TransferView() {
                 <button
                   onClick={() => (done ? setSending(false) : setCancel(true))}
                 >
-                  {done || failed ? "Back" : "Cancel"}
+                  <ArrowLeft class="settings-icon" />
                 </button>
                 <h1>{msg}</h1>
               </div>

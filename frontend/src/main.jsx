@@ -19,15 +19,16 @@ function App() {
       {view == Views.Transfer && (
         <button
           onClick={() => setView(Views.Settings)}
-          className="settings-button"
+          className="fixed-button transparent-button"
         >
-          <Settings className="settings-icon" />
+          <Settings className="icon" />
         </button>
       )}
 
       {view == Views.Settings && (
-        <button onClick={() => setView(Views.Transfer)} className="back-button">
-          <ArrowLeft class="settings-icon" />
+        <button onClick={() => setView(Views.Transfer)}
+          className="fixed-button transparent-button">
+          <ArrowLeft class="icon" />
         </button>
       )}
 

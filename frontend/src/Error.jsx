@@ -31,8 +31,8 @@ export default function ErrorTray() {
             style={{ zIndex: maxVisible - index }}
           >
             <p>{error.message}</p>
-            <button className="error-button" onClick={() => remove(error.id)}>
-              <X className="error-icon" />
+            <button className="transparent-button" onClick={() => remove(error.id)}>
+              <X className="icon" />
             </button>
           </div>
         ))}

@@ -1,4 +1,0 @@
-- using context to mediate app shutdown (specifically in medium.go) is so ugly...find a better way
-  generally, handling app shutdown needs to be reworked
-- weird edge cases:
-  - closing laptop lid while app is running

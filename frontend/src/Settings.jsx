@@ -26,9 +26,9 @@ export default function SettingsView() {
   return (
     <div className="content">
       <div className="row">
-        <p className="input-label">Toggle theme</p>
+        <p>Theme</p>
         <button
-          className="icon-button"
+          className="transparent-button"
           onClick={() => setTheme(theme == "light" ? "dark" : "light")}
         >
           {theme == "light" ? (
@@ -45,6 +45,7 @@ export default function SettingsView() {
           <input
             type="checkbox"
             className="checkbox"
+            checked={trustPeers}
             onChange={() => setTrustPeers(!trustPeers)}
           />
           <span className="fake-checkbox"></span>
@@ -57,6 +58,7 @@ export default function SettingsView() {
           <input
             type="checkbox"
             className="checkbox"
+            checked={showNotifications}
             onChange={() => setShowNotifications(!showNotifications)}
           />
           <span className="fake-checkbox"></span>
@@ -70,7 +72,7 @@ export default function SettingsView() {
         </button>
       </div>
 
-      <p className="copyright">Made with ❤️ by Abigail Adegbiji {copyright}</p>
+      <p className="copyright">Made with ❤️ by Abigail Adegbiji, {copyright}</p>
     </div>
   );
 }

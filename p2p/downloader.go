@@ -5,9 +5,9 @@ import (
 	"os"
 	"path"
 	"sync"
-	"syscall"
 
 	"github.com/edsrzf/mmap-go"
+	"golang.org/x/sys/unix"
 )
 
 type TransferChunk struct {
@@ -120,19 +120,14 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 	return nil
 }
 
-// linux specific syscall to allocate the size of a file
-// TODO: implement version for other operating systems
 func fallocate(file *os.File, offset int64, length int64) error {
 	if length == 0 {
 		return nil
 	}
-	return syscall.Fallocate(int(file.Fd()), 0, offset, length)
+	return unix.Fallocate(int(file.Fd()), 0, offset, length)
 }
 
 func OpenFile(path string, size int64) (mmap.MMap, error) {
-	// TODO: should be able to create the file with
-	// the same file permissions as the sender -- how to do in os-agnostic way?
-	// the permission should be applied after all the file contents have been recived
 	exists := true
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
 	if os.IsNotExist(err) {
@@ -231,9 +226,6 @@ func (d *Downloader) receiveChunk(chunk TransferChunk) *Message {
 	}
 	copy(transfer.file[chunk.Offset:], chunk.Data)
 	if err := transfer.file.Unlock(); err != nil {
-		panic(err)
-	}
-	if err := transfer.file.Flush(); err != nil { // TODO: faster way?
 		panic(err)
 	}
 

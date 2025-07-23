@@ -7,9 +7,11 @@ import (
 	"io"
 	"os"
 	"path"
+	"path/filepath"
 	"strings"
 
 	"github.com/aabiji/drip/p2p"
+	"github.com/kirsle/configdir"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -65,9 +67,15 @@ type App struct {
 }
 
 func NewApp() *App {
+	configPath := configdir.LocalConfig("drip")
+	err := configdir.MakePath(configPath)
+	if err != nil {
+		panic(err)
+	}
+	configPath = filepath.Join(configPath, "settings.json")
+
 	events := make(chan p2p.Message, 25)
 	finder := p2p.NewPeerFinder(true, events)
-	configPath := "drip-settings.json"
 	settings := loadSettings(configPath)
 	app := &App{
 		events:     events,

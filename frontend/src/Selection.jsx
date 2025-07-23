@@ -35,7 +35,6 @@ export function FileEntry({ name, progress, onClick, recipient, error }) {
   );
 }
 
-// TODO: select all the files inside a folder
 export default function TransferSelection({
   setSending, selectedPeers, setSelectedPeers,
   selectedFiles, setSelectedFiles
@@ -86,17 +85,50 @@ export default function TransferSelection({
 
   const dragOverHandler = (event) => { event.preventDefault(); }
 
-  const dropHandler = (event) => {
+  const traverseEntry = (entry) => {
+    return new Promise((resolve) => {
+      if (entry.isFile) {
+        entry.file((file) => resolve([file]));
+      } else if (entry.isDirectory) {
+        const reader = entry.createReader();
+        const entries = [];
+
+        const readEntries = () => {
+          reader.readEntries(async (batch) => {
+            if (batch.length === 0) {
+              const promises = entries.map(traverseEntry);
+              const files = await Promise.all(promises);
+              resolve(files.flat());
+            } else {
+              entries.push(...batch);
+              readEntries();
+            }
+          });
+        };
+        readEntries();
+      }
+    });
+  }
+
+  const dropHandler = async (event) => {
     event.preventDefault();
-    let files = [];
-    if (event.dataTransfer.items) {
-      files = Array.from(event.dataTransfer.items)
-        .filter((item) => item.kind === "file")
-        .map((item) => item.getAsFile());
-    } else {
-      files = event.dataTransfer.files;
+
+    const items = event.dataTransfer.items;
+    const filePromises = [];
+
+    if (items) {
+      for (const item of items) {
+        if (item.kind === "file") {
+          const entry = item.webkitGetAsEntry();
+          if (entry) {
+            filePromises.push(traverseEntry(entry));
+          }
+        }
+      }
+
+      const files = (await Promise.all(filePromises)).flat();
+      addNonDuplicateFiles(files);
     }
-    addNonDuplicateFiles(files);
   };
 
   return (
@@ -130,7 +162,7 @@ export default function TransferSelection({
           <label className="file-label">
             <Upload className="upload-icon" />
             <p>Choose or drag and drop files</p>
-            <input type="file" multiple webkitdirectory
+            <input type="file" multiple webkitdirectory="true"
                 onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
           </label>
         </div>

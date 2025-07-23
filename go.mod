@@ -4,6 +4,7 @@ go 1.24.4
 
 require (
 	github.com/aabiji/drip/p2p v0.0.0-00010101000000-000000000000
+	github.com/kirsle/configdir v0.0.0-20170128060238-e45d2f54772f
 	github.com/wailsapp/wails/v2 v2.10.2
 )
 
@@ -57,7 +58,7 @@ require (
 	golang.org/x/mod v0.23.0 // indirect
 	golang.org/x/net v0.35.0 // indirect
 	golang.org/x/sync v0.11.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
 	golang.org/x/text v0.22.0 // indirect
 	golang.org/x/tools v0.30.0 // indirect
 )

@@ -1,5 +1,5 @@
 import { useState, useContext } from "react";
-import { ReactComponent as CloseIcon } from "./assets/close.svg";
+import { X } from "feather-icons-react";
 import { ErrorContext } from "./State";
 
 export default function ErrorTray() {
@@ -28,7 +28,7 @@ export default function ErrorTray() {
           style={{ zIndex: maxVisible - index }}>
           <p>{error.message}</p>
           <button className="error-button" onClick={() => remove(error.id)}>
-            <CloseIcon className="error-icon" />
+            <X className="error-icon" />
           </button>
         </div>
       ))}

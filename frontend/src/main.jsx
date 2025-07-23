@@ -6,8 +6,8 @@ import ErrorTray from "./Error";
 import TransferView from "./Transfer";
 import SettingsView from "./Settings";
 
-import { ReactComponent as SettingsIcon } from "./assets/settings.svg";
-import { ReactComponent as BackIcon } from "./assets/back.svg";
+import { Settings, ArrowLeft } from "feather-icons-react";
+
 import "./style.css";
 
 function App() {
@@ -18,13 +18,13 @@ function App() {
     <div className="app-wrapper">
       {view == Views.Transfer &&
         <button onClick={() => setView(Views.Settings)} className="settings-button">
-          <SettingsIcon className="settings-icon" />
+          <Settings className="settings-icon" />
         </button>
       }
 
       {view == Views.Settings &&
         <button onClick={() => setView(Views.Transfer)} className="back-button">
-          <BackIcon class="settings-icon" />
+          <ArrowLeft class="settings-icon" />
         </button>
       }
 

@@ -1,8 +1,7 @@
 import { useContext, useState } from "react";
 import { ThemeContext } from "./State";
 
-import { ReactComponent as SunIcon } from "./assets/sun.svg";
-import { ReactComponent as MoonIcon } from "./assets/moon.svg";
+import { Moon, Sun } from "feather-icons-react";
 
 export default function SettingsView() {
   const startYear = 2025;
@@ -11,6 +10,8 @@ export default function SettingsView() {
     startYear == currentYear ? `${startYear}` : `${startYear}-${currentYear}`;
 
   const [downloadPath, _setDownloadPath] = useState("~/Downloads/");
+  const [trustPeers, setTrustPeers] = useState(true);
+  const [showPopups, setShowPopups] = useState(false);
 
   const { theme, setTheme } = useContext(ThemeContext);
 
@@ -23,8 +24,8 @@ export default function SettingsView() {
           onClick={() => setTheme(theme == "light" ? "dark" : "light")}
         >
           {theme == "light"
-            ? <MoonIcon className="icon-button-svg" />
-            : <SunIcon className="icon-button-svg" />
+            ? <Moon className="icon-button-svg" />
+            : <Sun className="icon-button-svg" />
           }
         </button>
       </div>
@@ -34,7 +35,7 @@ export default function SettingsView() {
         <label className="custom-checkbox">
           <input
             type="checkbox" className="checkbox"
-            onChange={(event) => selectPeer(event, name)} />
+            onChange={(event) => setTrustPeers(!trustPeers)} />
           <span className="fake-checkbox"></span>
         </label>
       </div>
@@ -44,7 +45,7 @@ export default function SettingsView() {
         <label className="custom-checkbox">
           <input
             type="checkbox" className="checkbox"
-            onChange={(event) => selectPeer(event, name)} />
+            onChange={(event) => setShowPopups(!showPopups)} />
           <span className="fake-checkbox"></span>
         </label>
       </div>

@@ -1,5 +1,5 @@
 import { useContext, useEffect, useState, useRef } from "react";
-import { ReactComponent as UploadIcon } from "./assets/upload.svg";
+import { Upload } from "feather-icons-react";
 
 import { PeersContext } from "./State";
 
@@ -109,6 +109,7 @@ export default function TransferSelection({
                 <label className="custom-checkbox">
                   <input
                     type="checkbox" className="checkbox"
+                    multiple webkitdirectory
                     checked={selectedPeers.includes(name)}
                     onChange={(event) => selectPeer(event, name)} />
                   <span className="fake-checkbox"></span>
@@ -128,8 +129,8 @@ export default function TransferSelection({
           onDrop={(event) => dropHandler(event)}
           onDragOver={(event) => dragOverHandler(event)}>
           <label className="file-label">
-            <UploadIcon className="upload-icon" />
-            <p>Drag and drop or choose files</p>
+            <Upload className="upload-icon" />
+            <p>Choose or drag and drop files</p>
             <input type="file"
                 onChange={(event) => addNonDuplicateFiles(Array.from(event.target.files))} />
           </label>

@@ -9,11 +9,11 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "feather-icons-react": "^0.9.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0"
   },
   "devDependencies": {
-    "@svgr/rollup": "^8.1.0",
     "@types/react": "^18.0.17",
     "@types/react-dom": "^18.0.6",
     "@vitejs/plugin-react": "^2.0.1",

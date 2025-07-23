@@ -9,6 +9,3 @@ Build:
 # Should change the port when running multiple instances of the program
 wails dev -devserver "localhost:1234"
 ```
-
-Credits:
-- Icons from [here](https://www.svgrepo.com/collection/jtb-variety-thin-icons/)

@@ -2,68 +2,212 @@ package main
 
 import (
 	"fmt"
+	"image/color"
+	"os"
 
-	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/dialog"
-	"fyne.io/fyne/v2/widget"
+	"gioui.org/app"
+	"gioui.org/font"
+	"gioui.org/font/opentype"
+	"gioui.org/layout"
+	"gioui.org/op"
+	"gioui.org/text"
+	"gioui.org/widget"
+	"gioui.org/widget/material"
+	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
-// icons from: https://www.freepik.com/author/stockio/icons/stockio-fill_597
+const (
+	HOME_PAGE = iota
+	SETTINGS_PAGE
+	PROGRSSS_PAGE
+)
+
+type ListItem struct {
+	value   any
+	checked *widget.Bool
+	clicked *widget.Clickable
+}
+
+type UI struct {
+	peers     []ListItem
+	peersList *widget.List
+
+	files     []ListItem
+	filesList *widget.List
+
+	sendButton *widget.Clickable
+	uploadArea *widget.Clickable
+
+	page int
+}
+
+type C = layout.Context
+type D = layout.Dimensions
 
 func main() {
-	a := app.New()
-	w := a.NewWindow("Drip")
+	go func() {
+		window := new(app.Window)
+		var ops op.Ops
 
-	label := widget.NewLabel("hello world!")
+		theme := material.NewTheme()
+		roboto, err := loadFont("roboto.ttf")
+		if err != nil {
+			panic(err)
+		}
+		theme.Shaper = text.NewShaper(text.WithCollection(roboto))
 
-	checkbox := widget.NewCheck("Select me!", func(changed bool) {
-		fmt.Println("Checked: ", changed)
-	})
+		ui := UI{
+			peersList: &widget.List{
+				List: layout.List{Axis: layout.Vertical},
+			},
+			filesList: &widget.List{
+				List: layout.List{Axis: layout.Vertical},
+			},
+			sendButton: new(widget.Clickable),
+			uploadArea: new(widget.Clickable),
+			page:       HOME_PAGE,
+		}
+		for i := 0; i < 5; i++ {
+			ui.peers = append(ui.peers, ListItem{
+				value:   fmt.Sprintf("Peer %d", i),
+				checked: new(widget.Bool),
+			})
+			ui.files = append(ui.files, ListItem{
+				value:   fmt.Sprintf("File %d", i),
+				clicked: new(widget.Clickable),
+			})
+		}
 
-	button := widget.NewButton("Click me!", func() {
-		dialog.ShowFileOpen(func(file fyne.URIReadCloser, err error) {
+		for {
+			switch event := window.Event().(type) {
+			case app.DestroyEvent:
+				os.Exit(0)
+			case app.FrameEvent:
+				gtx := app.NewContext(&ops, event)
+				drawFrame(&ui, gtx, theme)
+				event.Frame(gtx.Ops)
+			}
+		}
+
+	}()
+	app.Main()
+}
+
+func loadFont(path string) ([]font.FontFace, error) {
+	contents, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	faces, err := opentype.ParseCollection(contents)
+	return faces, err
+}
+
+func drawIcon(data []byte, size int, lightMode bool) func(C) D {
+	return func(gtx C) D {
+		icon, err := widget.NewIcon(data)
+		if err != nil {
+			panic(err)
+		}
+
+		c := color.NRGBA{A: 255}
+		if !lightMode {
+			c = color.NRGBA{R: 255, G: 255, B: 255, A: 255}
+		}
+
+		gtx.Constraints.Min.X = size
+		gtx.Constraints.Min.Y = size
+		return icon.Layout(gtx, c)
+	}
+}
+
+func drawFileEntry(gtx C, theme *material.Theme, item ListItem) D {
+	return layout.Flex{
+		Alignment: layout.Start,
+		Axis:      layout.Horizontal,
+		Spacing:   layout.SpaceBetween,
+	}.Layout(gtx,
+		layout.Rigid(func(gtx C) D {
+			str := fmt.Sprintf("%v", item.value)
+			return material.Label(theme, 16, str).Layout(gtx)
+		}),
+
+		layout.Rigid(func(gtx C) D {
+			remove, err := widget.NewIcon(icons.NavigationClose)
 			if err != nil {
 				panic(err)
 			}
-			if file != nil {
-				fmt.Println(file.URI().Path())
-			}
-		}, w)
-	})
-
-	bar := widget.NewProgressBar()
-	bar.Min = 0
-	bar.Max = 100
-	bar.Value = 50
-
-	values := []string{"Value #1", "Value #2", "Value #3", "Value #4", "Value #5"}
-	list := widget.NewList(
-		func() int {
-			return len(values)
-		},
-		func() fyne.CanvasObject {
-			return widget.NewLabel("")
-		},
-		func(i widget.ListItemID, o fyne.CanvasObject) {
-			o.(*widget.Label).SetText(values[i])
-		},
+			return material.IconButton(theme, item.clicked, remove, "Remove file").Layout(gtx)
+		}),
 	)
-	scroll := container.NewScroll(list)
-	scroll.SetMinSize(fyne.NewSize(500, 300))
+}
 
-	res, err := fyne.LoadResourceFromPath("icons/upload.png")
-	if err != nil {
-		panic(err)
+/*
+TODO:
+header, progressbar, list, div, files selection, notification
+make it look half decent
+*/
+
+func drawFrame(ui *UI, gtx C, theme *material.Theme) {
+	iconName := icons.ActionSettings
+	if ui.page != HOME_PAGE {
+		iconName = icons.NavigationArrowBack
 	}
-	icon := widget.NewIcon(res)
 
-	box := container.NewVBox(label, checkbox, button, bar, scroll, icon)
+	layout.Stack{}.Layout(gtx,
+		// absolutely positioned icon
+		layout.Stacked(func(gtx C) D {
+			return layout.Inset{Top: 16, Right: 16}.Layout(gtx, func(gtx C) D {
+				return layout.E.Layout(gtx, drawIcon(iconName, 64, true))
+			})
+		}),
 
-	// system tray menu, drag and drop
+		// page content
+		layout.Stacked(func(gtx C) D {
+			return layout.Center.Layout(gtx, func(gtx C) D {
+				// 80% width
+				maxWidth := gtx.Constraints.Max.X * 80 / 100
+				gtx.Constraints.Max.X = maxWidth
+				gtx.Constraints.Min.X = maxWidth
 
-	w.SetContent(box)
-	w.Resize(fyne.NewSize(700, 500))
-	w.ShowAndRun()
+				return layout.Flex{
+					Alignment: layout.Middle,
+					Spacing:   layout.SpaceEvenly,
+					Axis:      layout.Vertical,
+				}.Layout(gtx,
+					// list of peers
+					layout.Flexed(0.5, func(gtx C) D {
+						return material.List(theme, ui.peersList).Layout(gtx, len(ui.peers), func(gtx C, i int) D {
+							str := fmt.Sprintf("%v", ui.peers[i].value)
+							return material.CheckBox(theme, ui.peers[i].checked, str).Layout(gtx)
+						})
+					}),
+
+					// file upload area
+					layout.Rigid(func(gtx C) D {
+						fmt.Println(ui.uploadArea.Clicked(gtx))
+
+						return ui.uploadArea.Layout(gtx, func(gtx C) D {
+							return layout.Flex{Alignment: layout.Start, Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(drawIcon(icons.FileFileUpload, 100, true)),
+								layout.Rigid(func(gtx C) D { return material.Label(theme, 20, "Select files").Layout(gtx) }),
+							)
+						})
+					}),
+
+					// list of selected files
+					layout.Flexed(0.5, func(gtx C) D {
+						return material.List(theme, ui.filesList).Layout(gtx, len(ui.files), func(gtx C, i int) D {
+							return drawFileEntry(gtx, theme, ui.files[i])
+						})
+					}),
+
+					// send button
+					layout.Rigid(func(gtx C) D {
+						return material.Button(theme, ui.sendButton, "Send files").Layout(gtx)
+					}),
+				)
+			})
+		}),
+	)
+
 }

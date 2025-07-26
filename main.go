@@ -2,15 +2,18 @@ package main
 
 import (
 	"fmt"
+	"image"
 	"image/color"
 	"os"
 
 	"gioui.org/app"
 	"gioui.org/font"
 	"gioui.org/font/opentype"
+	"gioui.org/io/pointer"
 	"gioui.org/layout"
 	"gioui.org/op"
 	"gioui.org/text"
+	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"golang.org/x/exp/shiny/materialdesign/icons"
@@ -22,27 +25,26 @@ const (
 	PROGRSSS_PAGE
 )
 
-type ListItem struct {
+type ItemState struct {
 	value   any
-	checked *widget.Bool
+	checked *widget.Bool // TODO: doesn't need to be a pointer
 	clicked *widget.Clickable
 }
 
 type UI struct {
-	peers     []ListItem
 	peersList *widget.List
-
-	files     []ListItem
 	filesList *widget.List
-
-	sendButton *widget.Clickable
-	uploadArea *widget.Clickable
-
-	page int
+	// TODO: this is a horrible idea. instead, just assign to fields,
+	//       since we probably won't end up having that many
+	states   map[string]*ItemState
+	page     int
+	numFiles int
+	numPeers int
 }
 
 type C = layout.Context
 type D = layout.Dimensions
+type T = *material.Theme
 
 func main() {
 	go func() {
@@ -57,25 +59,21 @@ func main() {
 		theme.Shaper = text.NewShaper(text.WithCollection(roboto))
 
 		ui := UI{
-			peersList: &widget.List{
-				List: layout.List{Axis: layout.Vertical},
-			},
-			filesList: &widget.List{
-				List: layout.List{Axis: layout.Vertical},
-			},
-			sendButton: new(widget.Clickable),
-			uploadArea: new(widget.Clickable),
-			page:       HOME_PAGE,
+			peersList: &widget.List{List: layout.List{Axis: layout.Vertical}},
+			filesList: &widget.List{List: layout.List{Axis: layout.Vertical}},
+			numFiles:  5, numPeers: 5,
+			states: make(map[string]*ItemState),
+			page:   SETTINGS_PAGE,
 		}
 		for i := 0; i < 5; i++ {
-			ui.peers = append(ui.peers, ListItem{
+			ui.states[fmt.Sprintf("PEER-%d", i)] = &ItemState{
 				value:   fmt.Sprintf("Peer %d", i),
 				checked: new(widget.Bool),
-			})
-			ui.files = append(ui.files, ListItem{
+			}
+			ui.states[fmt.Sprintf("FILE-%d", i)] = &ItemState{
 				value:   fmt.Sprintf("File %d", i),
 				clicked: new(widget.Clickable),
-			})
+			}
 		}
 
 		for {
@@ -102,6 +100,7 @@ func loadFont(path string) ([]font.FontFace, error) {
 	return faces, err
 }
 
+// TODO: cache icons
 func drawIcon(data []byte, size int, lightMode bool) func(C) D {
 	return func(gtx C) D {
 		icon, err := widget.NewIcon(data)
@@ -120,14 +119,14 @@ func drawIcon(data []byte, size int, lightMode bool) func(C) D {
 	}
 }
 
-func drawFileEntry(gtx C, theme *material.Theme, item ListItem) D {
+func drawFileEntry(gtx C, theme T, state *ItemState) D {
 	return layout.Flex{
 		Alignment: layout.Start,
 		Axis:      layout.Horizontal,
 		Spacing:   layout.SpaceBetween,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
-			str := fmt.Sprintf("%v", item.value)
+			str := fmt.Sprintf("%v", state.value)
 			return material.Label(theme, 16, str).Layout(gtx)
 		}),
 
@@ -136,7 +135,7 @@ func drawFileEntry(gtx C, theme *material.Theme, item ListItem) D {
 			if err != nil {
 				panic(err)
 			}
-			return material.IconButton(theme, item.clicked, remove, "Remove file").Layout(gtx)
+			return material.IconButton(theme, state.clicked, remove, "Remove file").Layout(gtx)
 		}),
 	)
 }
@@ -144,70 +143,109 @@ func drawFileEntry(gtx C, theme *material.Theme, item ListItem) D {
 /*
 TODO:
 header, progressbar, list, div, files selection, notification
-make it look half decent
 */
 
-func drawFrame(ui *UI, gtx C, theme *material.Theme) {
-	iconName := icons.ActionSettings
-	if ui.page != HOME_PAGE {
-		iconName = icons.NavigationArrowBack
-	}
-
+func drawFrame(ui *UI, gtx C, theme T) {
 	layout.Stack{}.Layout(gtx,
 		// absolutely positioned icon
 		layout.Stacked(func(gtx C) D {
-			return layout.Inset{Top: 16, Right: 16}.Layout(gtx, func(gtx C) D {
+			return layout.Inset{Top: 16, Left: 16}.Layout(gtx, func(gtx C) D {
+				iconName := icons.ActionSettings
+				if ui.page != HOME_PAGE {
+					iconName = icons.NavigationArrowBack
+				}
+				// TODO: make this a clickable icon
 				return layout.E.Layout(gtx, drawIcon(iconName, 64, true))
 			})
 		}),
 
-		// page content
+		// page content, horizontally & vertically centered, 75% width, 80% height
 		layout.Stacked(func(gtx C) D {
 			return layout.Center.Layout(gtx, func(gtx C) D {
-				// 80% width
-				maxWidth := gtx.Constraints.Max.X * 80 / 100
-				gtx.Constraints.Max.X = maxWidth
-				gtx.Constraints.Min.X = maxWidth
+				width := gtx.Constraints.Max.X * 75 / 100
+				xPadding := (gtx.Constraints.Max.X - width) / 4
 
-				return layout.Flex{
-					Alignment: layout.Middle,
-					Spacing:   layout.SpaceEvenly,
-					Axis:      layout.Vertical,
-				}.Layout(gtx,
-					// list of peers
-					layout.Flexed(0.5, func(gtx C) D {
-						return material.List(theme, ui.peersList).Layout(gtx, len(ui.peers), func(gtx C, i int) D {
-							str := fmt.Sprintf("%v", ui.peers[i].value)
-							return material.CheckBox(theme, ui.peers[i].checked, str).Layout(gtx)
-						})
-					}),
+				height := gtx.Constraints.Max.Y * 80 / 100
+				yPadding := (gtx.Constraints.Max.Y - height) / 4
 
-					// file upload area
-					layout.Rigid(func(gtx C) D {
-						fmt.Println(ui.uploadArea.Clicked(gtx))
+				return layout.Inset{
+					Top:    unit.Dp(yPadding),
+					Bottom: unit.Dp(yPadding),
+					Left:   unit.Dp(xPadding),
+					Right:  unit.Dp(xPadding),
+				}.Layout(gtx, func(gtx C) D {
+					gtx.Constraints = layout.Exact(image.Pt(width, height))
 
-						return ui.uploadArea.Layout(gtx, func(gtx C) D {
-							return layout.Flex{Alignment: layout.Start, Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(drawIcon(icons.FileFileUpload, 100, true)),
-								layout.Rigid(func(gtx C) D { return material.Label(theme, 20, "Select files").Layout(gtx) }),
-							)
-						})
-					}),
-
-					// list of selected files
-					layout.Flexed(0.5, func(gtx C) D {
-						return material.List(theme, ui.filesList).Layout(gtx, len(ui.files), func(gtx C, i int) D {
-							return drawFileEntry(gtx, theme, ui.files[i])
-						})
-					}),
-
-					// send button
-					layout.Rigid(func(gtx C) D {
-						return material.Button(theme, ui.sendButton, "Send files").Layout(gtx)
-					}),
-				)
+					if ui.page == HOME_PAGE {
+						return drawHomePage(gtx, theme, ui)
+					} else {
+						return drawSettingsPage(gtx, theme, ui)
+					}
+				})
 			})
 		}),
 	)
+}
 
+func drawHomePage(gtx C, theme T, ui *UI) D {
+	return layout.Flex{
+		Alignment: layout.Middle,
+		Spacing:   layout.SpaceEvenly,
+		Axis:      layout.Vertical,
+	}.Layout(gtx,
+		// list of peers
+		layout.Flexed(0.5, func(gtx C) D {
+			return material.List(theme, ui.peersList).Layout(gtx, ui.numPeers, func(gtx C, i int) D {
+				item := ui.states[fmt.Sprintf("PEER-%d", i)]
+				return material.CheckBox(theme, item.checked, fmt.Sprintf("%v", item.value)).Layout(gtx)
+			})
+		}),
+
+		// file upload area
+		layout.Rigid(func(gtx C) D {
+			item := ui.states["UPLOAD"]
+			fmt.Println(item.clicked.Clicked(gtx))
+
+			return item.clicked.Layout(gtx, func(gtx C) D {
+				pointer.CursorPointer.Add(gtx.Ops)
+
+				return layout.Flex{Alignment: layout.Start, Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(drawIcon(icons.FileFileUpload, 100, true)),
+					layout.Rigid(func(gtx C) D { return material.Label(theme, 20, "Select files").Layout(gtx) }),
+				)
+			})
+		}),
+
+		// list of selected files
+		layout.Flexed(0.5, func(gtx C) D {
+			return material.List(theme, ui.filesList).Layout(gtx, ui.numFiles, func(gtx C, i int) D {
+				return drawFileEntry(gtx, theme, ui.states[fmt.Sprintf("FILE-%d", i)])
+			})
+		}),
+
+		// send button
+		layout.Rigid(func(gtx C) D {
+			return material.Button(theme, ui.states["SEND-BTN"].clicked, "Send files").Layout(gtx)
+		}),
+	)
+}
+
+// theme, trust peers, show notifications, download folder, copyright
+
+func drawSettingsPage(gtx C, theme T, ui *UI) D {
+	optionElements := []layout.FlexChild{}
+	options := []string{"Trust peers", "Show notifications"}
+	for _, option := range options {
+		optionElements = append(optionElements, layout.Rigid(func(gtx C) D {
+			return material.CheckBox(theme, ui.states[option].checked, option).Layout(gtx)
+		}))
+	}
+
+	return layout.Flex{
+		Alignment: layout.Middle,
+		Spacing:   layout.SpaceEvenly,
+		Axis:      layout.Vertical,
+	}.Layout(gtx,
+		optionElements...,
+	)
 }

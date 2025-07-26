@@ -5,6 +5,7 @@ import (
 	"image"
 	"image/color"
 	"os"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/font"
@@ -19,27 +20,63 @@ import (
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
-const (
+const ( // pages
 	HOME_PAGE = iota
 	SETTINGS_PAGE
 	PROGRSSS_PAGE
 )
 
-type ItemState struct {
-	value   any
-	checked *widget.Bool // TODO: doesn't need to be a pointer
-	clicked *widget.Clickable
+const ( // icons
+	BACK_ICON = iota
+	GEAR_ICON
+	UPLOAD_ICON
+	CLOSE_ICON
+)
+
+const ( // buttons
+	BTNS_START = iota
+	UPLOAD_FILES
+	SEND_FILES
+	TOGGLE_THEME
+	PICK_PATH
+	PAGE_SWITCHER
+	BTNS_END
+)
+
+type FileEntry struct {
+	name    string
+	clicked widget.Clickable
 }
 
 type UI struct {
-	peersList *widget.List
+	peersList  *widget.List
+	peerChecks []widget.Bool
+
 	filesList *widget.List
-	// TODO: this is a horrible idea. instead, just assign to fields,
-	//       since we probably won't end up having that many
-	states   map[string]*ItemState
-	page     int
-	numFiles int
-	numPeers int
+	files     []FileEntry
+
+	trustOption  widget.Bool
+	notifyOption widget.Bool
+	isLightMode  widget.Bool
+
+	icons   []*widget.Icon
+	buttons []widget.Clickable
+
+	downloadPath string
+	currentPage  int
+}
+
+func (ui *UI) switchPages(gtx C) {
+	if ui.buttons[PAGE_SWITCHER].Clicked(gtx) {
+		if ui.currentPage == HOME_PAGE {
+			ui.currentPage = SETTINGS_PAGE
+		} else if ui.currentPage == SETTINGS_PAGE {
+			ui.currentPage = HOME_PAGE
+		} else if ui.currentPage == PROGRSSS_PAGE {
+			ui.currentPage = HOME_PAGE
+			// TODO: cancel sending...
+		}
+	}
 }
 
 type C = layout.Context
@@ -58,23 +95,7 @@ func main() {
 		}
 		theme.Shaper = text.NewShaper(text.WithCollection(roboto))
 
-		ui := UI{
-			peersList: &widget.List{List: layout.List{Axis: layout.Vertical}},
-			filesList: &widget.List{List: layout.List{Axis: layout.Vertical}},
-			numFiles:  5, numPeers: 5,
-			states: make(map[string]*ItemState),
-			page:   SETTINGS_PAGE,
-		}
-		for i := 0; i < 5; i++ {
-			ui.states[fmt.Sprintf("PEER-%d", i)] = &ItemState{
-				value:   fmt.Sprintf("Peer %d", i),
-				checked: new(widget.Bool),
-			}
-			ui.states[fmt.Sprintf("FILE-%d", i)] = &ItemState{
-				value:   fmt.Sprintf("File %d", i),
-				clicked: new(widget.Clickable),
-			}
-		}
+		ui := initUI()
 
 		for {
 			switch event := window.Event().(type) {
@@ -82,13 +103,44 @@ func main() {
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, event)
-				drawFrame(&ui, gtx, theme)
+				drawFrame(ui, gtx, theme)
 				event.Frame(gtx.Ops)
 			}
 		}
 
 	}()
 	app.Main()
+}
+
+func initUI() *UI {
+	ui := &UI{
+		peersList:    &widget.List{List: layout.List{Axis: layout.Vertical}},
+		filesList:    &widget.List{List: layout.List{Axis: layout.Vertical}},
+		downloadPath: "~/Downloads",
+		currentPage:  HOME_PAGE,
+	}
+
+	iconData := [][]byte{
+		icons.NavigationArrowBack, icons.ActionSettings,
+		icons.FileFileUpload, icons.NavigationClose}
+	for _, data := range iconData {
+		icon, err := widget.NewIcon(data)
+		if err != nil {
+			panic(err)
+		}
+		ui.icons = append(ui.icons, icon)
+	}
+
+	for i := 0; i < BTNS_END-BTNS_START; i++ {
+		ui.buttons = append(ui.buttons, widget.Clickable{})
+	}
+
+	for i := 0; i < 5; i++ {
+		ui.peerChecks = append(ui.peerChecks, widget.Bool{})
+		ui.files = append(ui.files, FileEntry{name: fmt.Sprintf("File %d", i)})
+	}
+
+	return ui
 }
 
 func loadFont(path string) ([]font.FontFace, error) {
@@ -119,15 +171,14 @@ func drawIcon(data []byte, size int, lightMode bool) func(C) D {
 	}
 }
 
-func drawFileEntry(gtx C, theme T, state *ItemState) D {
+func drawFileEntry(gtx C, theme T, file *FileEntry) D {
 	return layout.Flex{
 		Alignment: layout.Start,
 		Axis:      layout.Horizontal,
 		Spacing:   layout.SpaceBetween,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx C) D {
-			str := fmt.Sprintf("%v", state.value)
-			return material.Label(theme, 16, str).Layout(gtx)
+			return material.Label(theme, 16, file.name).Layout(gtx)
 		}),
 
 		layout.Rigid(func(gtx C) D {
@@ -135,7 +186,7 @@ func drawFileEntry(gtx C, theme T, state *ItemState) D {
 			if err != nil {
 				panic(err)
 			}
-			return material.IconButton(theme, state.clicked, remove, "Remove file").Layout(gtx)
+			return material.IconButton(theme, &file.clicked, remove, "Remove file").Layout(gtx)
 		}),
 	)
 }
@@ -150,12 +201,15 @@ func drawFrame(ui *UI, gtx C, theme T) {
 		// absolutely positioned icon
 		layout.Stacked(func(gtx C) D {
 			return layout.Inset{Top: 16, Left: 16}.Layout(gtx, func(gtx C) D {
-				iconName := icons.ActionSettings
-				if ui.page != HOME_PAGE {
-					iconName = icons.NavigationArrowBack
+				ui.switchPages(gtx)
+				i := ui.icons[GEAR_ICON]
+				if ui.currentPage != HOME_PAGE {
+					i = ui.icons[BACK_ICON]
 				}
-				// TODO: make this a clickable icon
-				return layout.E.Layout(gtx, drawIcon(iconName, 64, true))
+				return layout.E.Layout(gtx, func(gtx C) D {
+					return material.IconButton(theme, &ui.buttons[PAGE_SWITCHER],
+						i, "View settings").Layout(gtx)
+				})
 			})
 		}),
 
@@ -176,7 +230,7 @@ func drawFrame(ui *UI, gtx C, theme T) {
 				}.Layout(gtx, func(gtx C) D {
 					gtx.Constraints = layout.Exact(image.Pt(width, height))
 
-					if ui.page == HOME_PAGE {
+					if ui.currentPage == HOME_PAGE {
 						return drawHomePage(gtx, theme, ui)
 					} else {
 						return drawSettingsPage(gtx, theme, ui)
@@ -195,18 +249,17 @@ func drawHomePage(gtx C, theme T, ui *UI) D {
 	}.Layout(gtx,
 		// list of peers
 		layout.Flexed(0.5, func(gtx C) D {
-			return material.List(theme, ui.peersList).Layout(gtx, ui.numPeers, func(gtx C, i int) D {
-				item := ui.states[fmt.Sprintf("PEER-%d", i)]
-				return material.CheckBox(theme, item.checked, fmt.Sprintf("%v", item.value)).Layout(gtx)
+			return material.List(theme, ui.peersList).Layout(gtx, len(ui.peerChecks), func(gtx C, i int) D {
+				str := fmt.Sprintf("PEER-%d", i)
+				return material.CheckBox(theme, &ui.peerChecks[i], fmt.Sprintf("%v", str)).Layout(gtx)
 			})
 		}),
 
 		// file upload area
 		layout.Rigid(func(gtx C) D {
-			item := ui.states["UPLOAD"]
-			fmt.Println(item.clicked.Clicked(gtx))
+			fmt.Println(ui.buttons[UPLOAD_FILES].Clicked(gtx))
 
-			return item.clicked.Layout(gtx, func(gtx C) D {
+			return ui.buttons[UPLOAD_FILES].Layout(gtx, func(gtx C) D {
 				pointer.CursorPointer.Add(gtx.Ops)
 
 				return layout.Flex{Alignment: layout.Start, Axis: layout.Vertical}.Layout(gtx,
@@ -218,14 +271,14 @@ func drawHomePage(gtx C, theme T, ui *UI) D {
 
 		// list of selected files
 		layout.Flexed(0.5, func(gtx C) D {
-			return material.List(theme, ui.filesList).Layout(gtx, ui.numFiles, func(gtx C, i int) D {
-				return drawFileEntry(gtx, theme, ui.states[fmt.Sprintf("FILE-%d", i)])
+			return material.List(theme, ui.filesList).Layout(gtx, len(ui.files), func(gtx C, i int) D {
+				return drawFileEntry(gtx, theme, &ui.files[i])
 			})
 		}),
 
 		// send button
 		layout.Rigid(func(gtx C) D {
-			return material.Button(theme, ui.states["SEND-BTN"].clicked, "Send files").Layout(gtx)
+			return material.Button(theme, &ui.buttons[SEND_FILES], "Send files").Layout(gtx)
 		}),
 	)
 }
@@ -233,19 +286,53 @@ func drawHomePage(gtx C, theme T, ui *UI) D {
 // theme, trust peers, show notifications, download folder, copyright
 
 func drawSettingsPage(gtx C, theme T, ui *UI) D {
-	optionElements := []layout.FlexChild{}
-	options := []string{"Trust peers", "Show notifications"}
-	for _, option := range options {
-		optionElements = append(optionElements, layout.Rigid(func(gtx C) D {
-			return material.CheckBox(theme, ui.states[option].checked, option).Layout(gtx)
-		}))
-	}
-
 	return layout.Flex{
 		Alignment: layout.Middle,
 		Spacing:   layout.SpaceEvenly,
 		Axis:      layout.Vertical,
 	}.Layout(gtx,
-		optionElements...,
+		// toggle theme
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{
+				Spacing: layout.SpaceBetween, Axis: layout.Horizontal,
+			}.Layout(gtx,
+				layout.Flexed(0.5, func(gtx C) D {
+					return material.Label(theme, 20, "Toggle theme").Layout(gtx)
+				}),
+				layout.Flexed(0.5, func(gtx C) D {
+					return material.Switch(theme, &ui.isLightMode, "Toggle theme").Layout(gtx)
+				}),
+			)
+		}),
+		// download path
+		layout.Rigid(func(gtx C) D {
+			return layout.Flex{
+				Spacing: layout.SpaceBetween, Axis: layout.Horizontal,
+			}.Layout(gtx,
+				layout.Flexed(0.5, func(gtx C) D {
+					return material.Label(theme, 20, "Download path").Layout(gtx)
+				}),
+				layout.Flexed(0.5, func(gtx C) D {
+					return material.Button(theme, &ui.buttons[PICK_PATH], ui.downloadPath).Layout(gtx)
+				}),
+			)
+		}),
+		// show notifications
+		layout.Rigid(func(gtx C) D {
+			return material.CheckBox(theme, &ui.notifyOption, "Show notifications").Layout(gtx)
+		}),
+		// trust peers
+		layout.Rigid(func(gtx C) D {
+			return material.CheckBox(theme, &ui.trustOption, "Trust previous senders").Layout(gtx)
+		}),
+		layout.Rigid(func(gtx C) D {
+			year := time.Now().Year()
+			copyrightYear := "2025"
+			if year != 2025 {
+				copyrightYear = fmt.Sprintf("%s-%d", copyrightYear, year)
+			}
+			copyright := fmt.Sprintf("Abigail Adegbiji @aabiji, %s", copyrightYear)
+			return material.Label(theme, 20, copyright).Layout(gtx)
+		}),
 	)
 }

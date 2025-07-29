@@ -1,40 +1,30 @@
 package main
 
 import (
-	"embed"
-
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
+	"gioui.org/app"
+	"gioui.org/op"
+	"gioui.org/x/explorer"
+	"os"
 )
 
-//go:embed all:frontend/dist
-var assets embed.FS
-
-/*
-- Make transfers significantly faster
-- Handle errors in the backend
-- Add app logging to file
-- Completely efactor the backend implementation
-- Port to android
-- Fix bugs
-*/
-
 func main() {
-	app := NewApp()
+	go func() {
+		var ops op.Ops
+		window := new(app.Window)
+		e := explorer.NewExplorer(window)
+		ui := NewUI(e)
 
-	err := wails.Run(&options.App{
-		Title:             "drip",
-		Width:             900,
-		Height:            700,
-		AssetServer:       &assetserver.Options{Assets: assets},
-		OnStartup:         app.startup,
-		OnShutdown:        app.shutdown,
-		Bind:              []any{app},
-		HideWindowOnClose: false,
-	})
+		for {
+			switch event := window.Event().(type) {
+			case app.DestroyEvent:
+				os.Exit(0)
+			case app.FrameEvent:
+				gtx := app.NewContext(&ops, event)
+				ui.DrawFrame(gtx)
+				event.Frame(gtx.Ops)
+			}
+		}
 
-	if err != nil {
-		println("Error:", err.Error())
-	}
+	}()
+	app.Main()
 }

@@ -24,7 +24,6 @@ func main() {
 				event.Frame(gtx.Ops)
 			}
 		}
-
 	}()
 	app.Main()
 }

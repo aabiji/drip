@@ -19,6 +19,9 @@ import (
 )
 
 type Styles struct {
+	theme        *material.Theme
+	rounding     int
+	borderWidth  int
 	fg400        color.NRGBA
 	fg500        color.NRGBA
 	bg400        color.NRGBA
@@ -33,9 +36,6 @@ type Styles struct {
 	secondary500 color.NRGBA
 	bgOverlay    color.NRGBA
 	transparent  color.NRGBA
-	theme        *material.Theme
-	rounding     int
-	borderWidth  int
 }
 
 func loadFont(path string) ([]font.FontFace, error) {
@@ -85,7 +85,7 @@ func NewStyles(darkMode bool) Styles {
 	base.theme = material.NewTheme()
 	base.theme.Fg = base.fg500
 
-	roboto, err := loadFont("roboto.ttf")
+	roboto, err := loadFont("assets/roboto.ttf")
 	if err != nil {
 		panic(err)
 	}

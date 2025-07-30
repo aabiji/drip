@@ -159,6 +159,17 @@ func (ui *UI) addFiles() {
 	}
 }
 
+func isWriteable(folderPath string) bool {
+	temp := filepath.Join(folderPath, ".temp")
+	file, err := os.Create(temp)
+	if err != nil {
+		return false
+	}
+
+	file.Close()
+	return os.Remove(temp) == nil
+}
+
 func (ui *UI) setupFolderList() {
 	entries, err := os.ReadDir(ui.downloadPath)
 	if err != nil {
@@ -167,7 +178,8 @@ func (ui *UI) setupFolderList() {
 
 	ui.folders = nil
 	for _, entry := range entries {
-		if entry.IsDir() {
+		fullpath := filepath.Join(ui.downloadPath, entry.Name())
+		if entry.IsDir() && isWriteable(fullpath) {
 			ui.folders = append(ui.folders, FolderEntry{name: entry.Name()})
 		}
 	}

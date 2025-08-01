@@ -97,20 +97,20 @@ func (d *Downloader) CancelSessions(disconnectedPeer string) {
 func (d *Downloader) ReceiveMessage(msg Message) *Message {
 	switch msg.MessageType {
 	case SESSION_INFO:
-		info, err := DeserializeInto[SessionInfo](msg)
+		info, err := Deserialize[SessionInfo](msg)
 		if err != nil {
 			panic(err)
 		}
 		info.Sender = msg.SenderId
 		return d.receiveInfo(info)
 	case TRANSFER_CHUNK:
-		chunk, err := DeserializeInto[TransferChunk](msg)
+		chunk, err := Deserialize[TransferChunk](msg)
 		if err != nil {
 			panic(err)
 		}
 		return d.receiveChunk(chunk)
 	case SESSION_CANCEL:
-		info, err := DeserializeInto[SessionCancel](msg)
+		info, err := Deserialize[SessionCancel](msg)
 		if err != nil {
 			panic(err)
 		}
@@ -155,7 +155,7 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	response := SessionResponse{SessionId: info.SessionId, Accepted: false}
 	authorized := d.authorizeCallback(info.Sender)
 	if !authorized {
-		msg := NewMessage(string(SESSSION_RESPONSE), response)
+		msg := NewMessage(SESSSION_RESPONSE, response)
 		return &msg
 	}
 
@@ -176,7 +176,7 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	}
 
 	response.Accepted = true
-	msg := NewMessage(string(SESSSION_RESPONSE), response)
+	msg := NewMessage(SESSSION_RESPONSE, response)
 	return &msg
 }
 

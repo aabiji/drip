@@ -12,26 +12,33 @@ import (
 )
 
 type PeerFinder struct {
-	Peers     map[string]*Peer
-	mutex     sync.Mutex // guards Peers
-	appEvents chan Message
+	Peers map[string]*Peer
+	mutex sync.Mutex // guards Peers
 
-	devicePort  int
-	serviceType string
-
+	devicePort         int
+	serviceType        string
 	peerRemovalTimeout time.Duration
 	queryFrequency     time.Duration
 	server             *mdns.Server
+
+	ctx    context.Context
+	d      *Downloader
+	events chan Message
 }
 
-func NewPeerFinder(debugMode bool, appEvents chan Message) PeerFinder {
+func NewPeerFinder(
+	ctx context.Context, d *Downloader,
+	events chan Message) PeerFinder {
 	return PeerFinder{
-		devicePort:         getUnusedPort(),
 		Peers:              make(map[string]*Peer),
+		devicePort:         getUnusedPort(),
 		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
-		appEvents:          appEvents,
+
+		ctx:    ctx,
+		d:      d,
+		events: events,
 	}
 }
 
@@ -62,7 +69,7 @@ func (f *PeerFinder) broadcastOurService() error {
 	return err
 }
 
-func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry, d *Downloader) {
+func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
 	if peerId == getDeviceName() {
 		return // ignore ourselves
@@ -79,9 +86,8 @@ func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry, d *D
 			id:         peerId,
 			port:       entry.Port,
 			devicePort: f.devicePort,
-			downloader: d,
-			appEvents:  f.appEvents,
-			parentCtx:  ctx,
+			downloader: f.d,
+			parentCtx:  f.ctx,
 		})
 		peer.CreateConnection()
 		peer.SetupDataChannels()
@@ -92,15 +98,15 @@ func (f *PeerFinder) addPeer(ctx context.Context, entry *mdns.ServiceEntry, d *D
 }
 
 // Listen for broadcasts from other devices every 10 seconds
-func (f *PeerFinder) listenForBroadcasts(ctx context.Context, d *Downloader) error {
+func (f *PeerFinder) listenForBroadcasts() error {
 	// Start lisening to the broadcasts of other devices
 	entriesChannel := make(chan *mdns.ServiceEntry, 25)
 	defer close(entriesChannel)
 
 	go func() {
 		for entry := range entriesChannel {
-			f.addPeer(ctx, entry, d)
-			f.appEvents <- NewMessage[any](PEERS_UPDATED, nil)
+			f.addPeer(entry)
+			f.events <- NewMessage[any](PEERS_UPDATED, nil)
 		}
 	}()
 
@@ -117,6 +123,7 @@ func (f *PeerFinder) listenForBroadcasts(ctx context.Context, d *Downloader) err
 		f.mutex.Lock()
 		for key, value := range f.Peers {
 			if time.Since(value.LastHeardFrom) >= f.peerRemovalTimeout {
+				f.Peers[key].Close()
 				delete(f.Peers, key)
 			}
 		}
@@ -124,8 +131,8 @@ func (f *PeerFinder) listenForBroadcasts(ctx context.Context, d *Downloader) err
 
 		// Stop looping when we receive a shutdown signal
 		select {
-		case <-ctx.Done():
-			return ctx.Err()
+		case <-f.ctx.Done():
+			return f.ctx.Err()
 		default:
 			continue
 		}
@@ -137,7 +144,7 @@ func (f *PeerFinder) Run(ctx context.Context, d *Downloader) error {
 		return err
 	}
 
-	if err := f.listenForBroadcasts(ctx, d); err != nil {
+	if err := f.listenForBroadcasts(); err != nil {
 		return err
 	}
 

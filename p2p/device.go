@@ -9,18 +9,6 @@ import (
 
 const DEBUG_MODE bool = true
 
-func getDeviceIP() net.IP {
-	// get the prefered outbound ip address of this device
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		panic(err) // getting the ip is a must
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP
-}
-
 var cached_device_name string = ""
 
 func getDeviceName() string {
@@ -40,6 +28,18 @@ func getDeviceName() string {
 	}
 	cached_device_name = name
 	return name
+}
+
+func getDeviceIP() net.IP {
+	// get the prefered outbound ip address of this device
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		panic(err) // getting the ip is a must
+	}
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP
 }
 
 func getUnusedPort() int {

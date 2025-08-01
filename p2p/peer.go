@@ -13,17 +13,16 @@ import (
 type Peer struct {
 	Id            string
 	LastHeardFrom time.Time
-
-	makingOffer bool
-	polite      bool
-
-	Webrtc    Medium
-	tcpMedium Medium
+	makingOffer   bool
+	polite        bool
 
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	connection *webrtc.PeerConnection
+	connection  *webrtc.PeerConnection
+	dataChannel *webrtc.DataChannel
+	server      TcpServer
+
 	downloader *Downloader
 	appEvents  chan Message
 }
@@ -55,7 +54,7 @@ func NewPeer(info peerInfo) *Peer {
 		LastHeardFrom: time.Now(),
 		makingOffer:   false,
 		polite:        polite,
-		tcpMedium:     NewTCPMedium(ourAddr, peerAddr),
+		server:        NewTcpServer(ourAddr, peerAddr, ctx),
 		ctx:           ctx,
 		cancel:        cancel,
 		downloader:    info.downloader,
@@ -70,16 +69,14 @@ func (p *Peer) Close() {
 		p.connection.Close()
 		p.connection = nil
 	}
-	if p.Webrtc != nil {
-		p.Webrtc.Close()
-		p.Webrtc = nil
+	if p.dataChannel != nil {
+		p.dataChannel.GracefulClose()
+		p.dataChannel = nil
 	}
 	p.downloader.CancelSessions(p.Id)
 }
 
-// The default value for an interface is nil, so we want to avoid
-// panicking when we haven't opened/received a data channel connection yet
-func (p *Peer) Connected() bool { return p.Webrtc != nil && p.Webrtc.Connected() }
+func (p *Peer) Connected() bool { return p.dataChannel != nil }
 
 func (p *Peer) CreateConnection() {
 	var err error
@@ -114,21 +111,25 @@ func (p *Peer) CreateConnection() {
 			panic(err)
 		}
 
-		p.tcpMedium.QueueMessage(NewMessage(OFFER_PACKET, offer))
+		p.server.QueueMessage(NewMessage(OFFER_PACKET, offer))
 		p.makingOffer = false
 
 		log.Println("Sending an offer")
 	})
 
 	p.connection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		p.tcpMedium.QueueMessage(NewMessage(ICE_PACKET, i))
+		p.server.QueueMessage(NewMessage(ICE_PACKET, i))
 		log.Println("Sending an ice candidate")
 	})
 }
 
-func (p *Peer) SetupDataChannels() {
-	handler := func(msg Message) {
-		// Forward session responses to the frontend
+func (p *Peer) handleReceivingData() {
+	p.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
+		msg := GetMessage(channelMsg.Data)
+		if msg.SenderId == getDeviceName() {
+			return // ignore our own messages
+		}
+
 		if msg.MessageType == SESSSION_RESPONSE {
 			p.appEvents <- msg
 			return
@@ -136,29 +137,29 @@ func (p *Peer) SetupDataChannels() {
 
 		reply := p.downloader.ReceiveMessage(msg)
 		if reply != nil {
-			p.Webrtc.QueueMessage(*reply)
+			p.dataChannel.Send(reply.Serialize())
 		}
-	}
+	})
+}
 
-	go func() { p.tcpMedium.ForwardMessages(p.ctx) }()
-	go func() { p.tcpMedium.ReceiveMessages(p.ctx, p.handlePeerMessage) }()
+func (p *Peer) SetupDataChannels() {
+	go func() { p.server.ForwardMessages() }()
+	go func() { p.server.ReceiveMessages(p.handlePeerMessage) }()
 
 	if p.polite {
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
+			p.dataChannel = dataChannel
+			p.handleReceivingData()
 			log.Println("Accepting a data channel -- responder")
-			p.Webrtc = NewWebRTCMedium(dataChannel)
-			p.Webrtc.ForwardMessages(p.ctx)
-			p.Webrtc.ReceiveMessages(p.ctx, handler)
 		})
 	} else {
-		log.Println("Creating a data channel -- initiator")
-		dataChannel, err := p.connection.CreateDataChannel("data", nil)
+		var err error
+		p.dataChannel, err = p.connection.CreateDataChannel("data", nil)
 		if err != nil {
 			panic(err)
 		}
-		p.Webrtc = NewWebRTCMedium(dataChannel)
-		p.Webrtc.ForwardMessages(p.ctx)
-		p.Webrtc.ReceiveMessages(p.ctx, handler)
+		p.handleReceivingData()
+		log.Println("Creating a data channel -- initiator")
 	}
 }
 
@@ -172,7 +173,7 @@ func (p *Peer) handleOffer(msg Message) {
 	}
 	p.makingOffer = false
 
-	offer, err := DeserializeInto[webrtc.SessionDescription](msg)
+	offer, err := Deserialize[webrtc.SessionDescription](msg)
 	if err != nil {
 		panic(err)
 	}
@@ -188,36 +189,31 @@ func (p *Peer) handleOffer(msg Message) {
 	if err := p.connection.SetLocalDescription(answer); err != nil {
 		panic(err)
 	}
-	p.tcpMedium.QueueMessage(NewMessage(ANSWER_PACKET, answer))
+	p.server.QueueMessage(NewMessage(ANSWER_PACKET, answer))
 	log.Println("Accepting an offer")
-}
-
-func (p *Peer) handleAnswer(msg Message) {
-	answer, err := DeserializeInto[webrtc.SessionDescription](msg)
-	if err != nil {
-		panic(err)
-	}
-	p.connection.SetRemoteDescription(answer)
-	log.Println("Accepting an answer")
-}
-
-func (p *Peer) handleICECandidate(msg Message) {
-	candidate, err := DeserializeInto[webrtc.ICECandidate](msg)
-	if err != nil {
-		panic(err)
-	}
-	p.connection.AddICECandidate(candidate.ToJSON())
-	log.Println("Adding an ICE candidate")
 }
 
 func (p *Peer) handlePeerMessage(msg Message) {
 	switch msg.MessageType {
+	case ANSWER_PACKET:
+		answer, err := Deserialize[webrtc.SessionDescription](msg)
+		if err != nil {
+			panic(err)
+		}
+		p.connection.SetRemoteDescription(answer)
+		log.Println("Accepting an answer")
+
+	case ICE_PACKET:
+		candidate, err := Deserialize[webrtc.ICECandidate](msg)
+		if err != nil {
+			panic(err)
+		}
+		p.connection.AddICECandidate(candidate.ToJSON())
+		log.Println("Adding an ICE candidate")
+
 	case OFFER_PACKET:
 		p.handleOffer(msg)
-	case ANSWER_PACKET:
-		p.handleAnswer(msg)
-	case ICE_PACKET:
-		p.handleICECandidate(msg)
+
 	default:
 		panic("uknown signal type")
 	}

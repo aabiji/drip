@@ -2,20 +2,18 @@ package p2p
 
 import "encoding/json"
 
-const (
-	// tcp webrtc message types
-	OFFER_PACKET = iota
-	ANSWER_PACKET
-	ICE_PACKET
+const ( // message types
+	OFFER_TCP_PACKET = iota
+	ANSWER_TCP_PACKET
+	ICE_TCP_PACKET
 
-	// file transfer message types
-	SESSION_INFO
-	SESSSION_RESPONSE
-	SESSION_CANCEL
+	TRANSFER_SESSION_INFO
+	TRANSFER_SESSION_AUTH
+	TRANSFER_SESSION_CANCEL
 	TRANSFER_CHUNK
 
-	// event types
-	PEERS_UPDATED
+	ADDED_PEER
+	REMOVED_PEER
 )
 
 type Message struct {

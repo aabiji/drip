@@ -10,72 +10,26 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-type TransferChunk struct {
-	TransferId string  `json:"transferId"`
-	Recipient  string  `json:"recipient"`
-	Data       []uint8 `json:"data"`
-	Offset     int64   `json:"offset"`
-}
-
-type Transfer struct {
-	SessionId  string `json:"sessionId"`
-	TransferId string `json:"transferId"`
-	Recipient  string `json:"recipient"`
-	FileSize   int64  `json:"size"`
-
-	file   mmap.MMap
-	closed bool
-	done   bool
-}
-
-type SessionInfo struct {
-	SessionId  string     `json:"sessionId"`
-	Recipients []string   `json:"recipients"`
-	Transfers  []Transfer `json:"transfers"`
-	Sender     string     `json:"sender,omitempty"`
-}
-
-type SessionCancel struct {
-	SessionId  string   `json:"sessionId"`
-	Recipients []string `json:"recipients"`
-}
-
-type SessionResponse struct {
-	SessionId string `json:"sessionId"`
-	Accepted  bool   `json:"accepted"`
-}
-
-func (t *Transfer) Close() {
-	if !t.closed {
-		if err := t.file.Unmap(); err != nil {
-			panic(err)
-		}
-		t.closed = true
-	}
-}
-
 type Downloader struct {
-	transfers map[string]*Transfer
-	mutex     sync.Mutex // guards transfers
-	sessions  map[string]SessionInfo
-
-	downloadFolder    *string
-	authorizeCallback func(string) bool
-	notifyCallback    func(string, int)
+	transfers      map[string]*Transfer
+	mutex          sync.Mutex // guards transfers
+	sessions       map[string]SessionInfo
+	downloadFolder *string
+	authorize      AuthorizeCallback
+	notify         NotifyCallback
 }
 
 func NewDownloader(
 	downloadFolder *string,
-	authorizeCallback func(string) bool,
-	notifyCallback func(string, int),
-) *Downloader {
-	return &Downloader{
-		transfers: make(map[string]*Transfer),
-		sessions:  make(map[string]SessionInfo),
-
-		downloadFolder:    downloadFolder,
-		authorizeCallback: authorizeCallback,
-		notifyCallback:    notifyCallback,
+	authorize AuthorizeCallback,
+	notify NotifyCallback,
+) Downloader {
+	return Downloader{
+		transfers:      make(map[string]*Transfer),
+		sessions:       make(map[string]SessionInfo),
+		downloadFolder: downloadFolder,
+		authorize:      authorize,
+		notify:         notify,
 	}
 }
 
@@ -86,6 +40,7 @@ func (d *Downloader) Close() {
 	}
 }
 
+// stop receiving transfers from the peer
 func (d *Downloader) CancelSessions(disconnectedPeer string) {
 	for _, session := range d.sessions {
 		if session.Sender == disconnectedPeer {
@@ -96,12 +51,11 @@ func (d *Downloader) CancelSessions(disconnectedPeer string) {
 
 func (d *Downloader) ReceiveMessage(msg Message) *Message {
 	switch msg.MessageType {
-	case SESSION_INFO:
+	case TRANSFER_SESSION_INFO:
 		info, err := Deserialize[SessionInfo](msg)
 		if err != nil {
 			panic(err)
 		}
-		info.Sender = msg.SenderId
 		return d.receiveInfo(info)
 	case TRANSFER_CHUNK:
 		chunk, err := Deserialize[TransferChunk](msg)
@@ -109,7 +63,7 @@ func (d *Downloader) ReceiveMessage(msg Message) *Message {
 			panic(err)
 		}
 		return d.receiveChunk(chunk)
-	case SESSION_CANCEL:
+	case TRANSFER_SESSION_CANCEL:
 		info, err := Deserialize[SessionCancel](msg)
 		if err != nil {
 			panic(err)
@@ -153,9 +107,9 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	defer d.mutex.Unlock()
 
 	response := SessionResponse{SessionId: info.SessionId, Accepted: false}
-	authorized := d.authorizeCallback(info.Sender)
+	authorized := d.authorize(info.Sender)
 	if !authorized {
-		msg := NewMessage(SESSSION_RESPONSE, response)
+		msg := NewMessage(TRANSFER_SESSION_AUTH, response)
 		return &msg
 	}
 
@@ -176,7 +130,7 @@ func (d *Downloader) receiveInfo(info SessionInfo) *Message {
 	}
 
 	response.Accepted = true
-	msg := NewMessage(SESSSION_RESPONSE, response)
+	msg := NewMessage(TRANSFER_SESSION_AUTH, response)
 	return &msg
 }
 
@@ -207,7 +161,7 @@ func (d *Downloader) handleTransferCompletion(transfer *Transfer) {
 		delete(d.sessions, session.SessionId)
 
 		// Notify the user
-		d.notifyCallback(session.Sender, len(session.Transfers))
+		d.notify(session.Sender, len(session.Transfers))
 	}
 }
 

@@ -11,56 +11,63 @@ import (
 	"github.com/hashicorp/mdns"
 )
 
-type PeerFinder struct {
-	Peers map[string]*Peer
-	mutex sync.Mutex // guards Peers
+type PeerInfo struct {
+	ip            net.IP
+	id            string
+	lastHeardFrom time.Time
+	port          int
+}
 
+type PeerFinder struct {
 	devicePort         int
-	serviceType        string
 	peerRemovalTimeout time.Duration
 	queryFrequency     time.Duration
 	server             *mdns.Server
+	serviceType        string
 
-	ctx    context.Context
-	d      *Downloader
-	events chan Message
+	peers map[string]PeerInfo
+	mu    sync.Mutex
+
+	ctx               context.Context
+	addPeerHandler    func(PeerInfo)
+	removePeerHandler func(string)
 }
 
 func NewPeerFinder(
-	ctx context.Context, d *Downloader,
-	events chan Message) PeerFinder {
+	devicePort int, ctx context.Context,
+	addPeerHandler func(PeerInfo),
+	removePeerHandler func(string),
+) PeerFinder {
 	return PeerFinder{
-		Peers:              make(map[string]*Peer),
-		devicePort:         getUnusedPort(),
 		serviceType:        "_fileshare._tcp.local.",
 		peerRemovalTimeout: time.Second * 15,
 		queryFrequency:     time.Second * 10,
-
-		ctx:    ctx,
-		d:      d,
-		events: events,
+		peers:              make(map[string]PeerInfo),
+		devicePort:         devicePort,
+		ctx:                ctx,
+		addPeerHandler:     addPeerHandler,
+		removePeerHandler:  removePeerHandler,
 	}
 }
 
-func (f *PeerFinder) GetConnectedPeers() []string {
-	f.mutex.Lock()
-	var ids []string
-	for id, peer := range f.Peers {
-		if peer.Connected() {
-			ids = append(ids, id)
-		}
+func deviceIP() net.IP {
+	// get the prefered outbound ip address of this device
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		panic(err) // getting the ip is a must
 	}
-	f.mutex.Unlock()
-	return ids
+	defer conn.Close()
+
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP
 }
 
 func (f *PeerFinder) broadcastOurService() error {
-	id := getDeviceName()
-	hostname := fmt.Sprintf("%s.local.", id)
+	hostname := fmt.Sprintf("%s.local.", getDeviceName())
 
 	service, err := mdns.NewMDNSService(
-		id, f.serviceType, "local.", hostname,
-		f.devicePort, []net.IP{getDeviceIP()}, []string{})
+		getDeviceName(), f.serviceType, "local.", hostname,
+		f.devicePort, []net.IP{deviceIP()}, []string{})
 	if err != nil {
 		return err
 	}
@@ -72,29 +79,24 @@ func (f *PeerFinder) broadcastOurService() error {
 func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
 	if peerId == getDeviceName() {
-		return // ignore ourselves
+		return
 	}
 
-	f.mutex.Lock()
-
-	_, exists := f.Peers[peerId]
-	if exists {
-		f.Peers[peerId].LastHeardFrom = time.Now()
+	f.mu.Lock()
+	if info, exists := f.peers[peerId]; exists {
+		info.lastHeardFrom = time.Now()
+		f.peers[peerId] = info
 	} else {
-		peer := NewPeer(peerInfo{
-			ip:         entry.AddrV4,
-			id:         peerId,
-			port:       entry.Port,
-			devicePort: f.devicePort,
-			downloader: f.d,
-			parentCtx:  f.ctx,
-		})
-		peer.CreateConnection()
-		peer.SetupDataChannels()
-		f.Peers[peerId] = peer
+		info := PeerInfo{
+			ip:            entry.AddrV4,
+			id:            peerId,
+			lastHeardFrom: time.Now(),
+			port:          entry.Port,
+		}
+		f.peers[peerId] = info
+		f.addPeerHandler(info)
 	}
-
-	f.mutex.Unlock()
+	f.mu.Unlock()
 }
 
 // Listen for broadcasts from other devices every 10 seconds
@@ -106,7 +108,6 @@ func (f *PeerFinder) listenForBroadcasts() error {
 	go func() {
 		for entry := range entriesChannel {
 			f.addPeer(entry)
-			f.events <- NewMessage[any](PEERS_UPDATED, nil)
 		}
 	}()
 
@@ -120,14 +121,14 @@ func (f *PeerFinder) listenForBroadcasts() error {
 		}
 
 		// Remove peers we haven't heard from in a while
-		f.mutex.Lock()
-		for key, value := range f.Peers {
-			if time.Since(value.LastHeardFrom) >= f.peerRemovalTimeout {
-				f.Peers[key].Close()
-				delete(f.Peers, key)
+		f.mu.Lock()
+		for key, peer := range f.peers {
+			if time.Since(peer.lastHeardFrom) >= f.peerRemovalTimeout {
+				f.removePeerHandler(key)
+				delete(f.peers, key)
 			}
 		}
-		f.mutex.Unlock()
+		f.mu.Unlock()
 
 		// Stop looping when we receive a shutdown signal
 		select {
@@ -139,7 +140,7 @@ func (f *PeerFinder) listenForBroadcasts() error {
 	}
 }
 
-func (f *PeerFinder) Run(ctx context.Context, d *Downloader) error {
+func (f *PeerFinder) Run() error {
 	if err := f.broadcastOurService(); err != nil {
 		return err
 	}

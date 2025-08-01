@@ -5,65 +5,53 @@ import (
 	"fmt"
 	"log"
 	"net"
-	"time"
 
 	"github.com/pion/webrtc/v4"
 )
 
-type Peer struct {
-	Id            string
-	LastHeardFrom time.Time
-	makingOffer   bool
-	polite        bool
-
-	ctx    context.Context
-	cancel context.CancelFunc
+type PeerConnection struct {
+	id          string
+	makingOffer bool
+	polite      bool
 
 	connection  *webrtc.PeerConnection
 	dataChannel *webrtc.DataChannel
 	server      TcpServer
 
-	downloader *Downloader
-	appEvents  chan Message
+	ctx             context.Context
+	cancel          context.CancelFunc
+	transferHandler TransferMessageHandler
 }
 
-type peerInfo struct {
-	ip         net.IP
-	id         string
-	port       int
-	devicePort int
-	downloader *Downloader
-	appEvents  chan Message
-	parentCtx  context.Context
-}
-
-func NewPeer(info peerInfo) *Peer {
-	ourAddr := fmt.Sprintf(":%d", info.devicePort)
-	peerAddr := fmt.Sprintf("%s:%d", info.ip.String(), info.port)
-	ctx, cancel := context.WithCancel(info.parentCtx)
+func NewPeer(
+	ip net.IP, id string,
+	devicePort int, port int,
+	parentCtx context.Context,
+	handler TransferMessageHandler,
+) *PeerConnection {
+	ourAddr := fmt.Sprintf(":%d", devicePort)
+	peerAddr := fmt.Sprintf("%s:%d", ip.String(), port)
+	ctx, cancel := context.WithCancel(parentCtx)
 
 	// This will be used for perfect negotiation. Being polite will
 	// mean we forego our own offer when we receive an offer from a peer.
 	// Being impolite will mean we ignore the peer's offer and continue with
 	// our own. This way, we avoid collisions by knowing that only one peer
 	// is able to initiate a connection
-	polite := info.id < getDeviceName()
+	polite := id < getDeviceName()
 
-	return &Peer{
-		Id:            info.id,
-		LastHeardFrom: time.Now(),
-		makingOffer:   false,
-		polite:        polite,
-		server:        NewTcpServer(ourAddr, peerAddr, ctx),
-		ctx:           ctx,
-		cancel:        cancel,
-		downloader:    info.downloader,
-		appEvents:     info.appEvents,
+	return &PeerConnection{
+		makingOffer:     false,
+		polite:          polite,
+		server:          NewTcpServer(ourAddr, peerAddr, ctx),
+		ctx:             ctx,
+		cancel:          cancel,
+		transferHandler: handler,
 	}
 }
 
 // Will also call the dataChannel's OnClose
-func (p *Peer) Close() {
+func (p *PeerConnection) Close() {
 	p.cancel()
 	if p.connection != nil {
 		p.connection.Close()
@@ -73,12 +61,11 @@ func (p *Peer) Close() {
 		p.dataChannel.GracefulClose()
 		p.dataChannel = nil
 	}
-	p.downloader.CancelSessions(p.Id)
 }
 
-func (p *Peer) Connected() bool { return p.dataChannel != nil }
+func (p *PeerConnection) Connected() bool { return p.dataChannel != nil }
 
-func (p *Peer) CreateConnection() {
+func (p *PeerConnection) CreateConnection() {
 	var err error
 	config := webrtc.Configuration{
 		ICEServers: []webrtc.ICEServer{{URLs: []string{"stun:stun.l.google.com:19302"}}},
@@ -111,38 +98,34 @@ func (p *Peer) CreateConnection() {
 			panic(err)
 		}
 
-		p.server.QueueMessage(NewMessage(OFFER_PACKET, offer))
+		p.server.QueueMessage(NewMessage(OFFER_TCP_PACKET, offer))
 		p.makingOffer = false
 
 		log.Println("Sending an offer")
 	})
 
 	p.connection.OnICECandidate(func(i *webrtc.ICECandidate) {
-		p.server.QueueMessage(NewMessage(ICE_PACKET, i))
+		p.server.QueueMessage(NewMessage(ICE_TCP_PACKET, i))
 		log.Println("Sending an ice candidate")
 	})
 }
 
-func (p *Peer) handleReceivingData() {
+func (p *PeerConnection) handleReceivingData() {
 	p.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
 		msg := GetMessage(channelMsg.Data)
 		if msg.SenderId == getDeviceName() {
 			return // ignore our own messages
 		}
 
-		if msg.MessageType == SESSSION_RESPONSE {
-			p.appEvents <- msg
-			return
-		}
-
-		reply := p.downloader.ReceiveMessage(msg)
-		if reply != nil {
-			p.dataChannel.Send(reply.Serialize())
-		}
+		p.transferHandler(msg, func(reply *Message) {
+			if reply != nil {
+				p.dataChannel.Send(reply.Serialize())
+			}
+		})
 	})
 }
 
-func (p *Peer) SetupDataChannels() {
+func (p *PeerConnection) SetupDataChannels() {
 	go func() { p.server.ForwardMessages() }()
 	go func() { p.server.ReceiveMessages(p.handlePeerMessage) }()
 
@@ -163,7 +146,7 @@ func (p *Peer) SetupDataChannels() {
 	}
 }
 
-func (p *Peer) handleOffer(msg Message) {
+func (p *PeerConnection) handleOffer(msg Message) {
 	// are we getting an offer in the middle of sending ours?
 	negotiating := p.connection.SignalingState() != webrtc.SignalingStateStable
 	offerCollision := negotiating || p.makingOffer
@@ -189,13 +172,13 @@ func (p *Peer) handleOffer(msg Message) {
 	if err := p.connection.SetLocalDescription(answer); err != nil {
 		panic(err)
 	}
-	p.server.QueueMessage(NewMessage(ANSWER_PACKET, answer))
+	p.server.QueueMessage(NewMessage(ANSWER_TCP_PACKET, answer))
 	log.Println("Accepting an offer")
 }
 
-func (p *Peer) handlePeerMessage(msg Message) {
+func (p *PeerConnection) handlePeerMessage(msg Message) {
 	switch msg.MessageType {
-	case ANSWER_PACKET:
+	case ANSWER_TCP_PACKET:
 		answer, err := Deserialize[webrtc.SessionDescription](msg)
 		if err != nil {
 			panic(err)
@@ -203,7 +186,7 @@ func (p *Peer) handlePeerMessage(msg Message) {
 		p.connection.SetRemoteDescription(answer)
 		log.Println("Accepting an answer")
 
-	case ICE_PACKET:
+	case ICE_TCP_PACKET:
 		candidate, err := Deserialize[webrtc.ICECandidate](msg)
 		if err != nil {
 			panic(err)
@@ -211,7 +194,7 @@ func (p *Peer) handlePeerMessage(msg Message) {
 		p.connection.AddICECandidate(candidate.ToJSON())
 		log.Println("Adding an ICE candidate")
 
-	case OFFER_PACKET:
+	case OFFER_TCP_PACKET:
 		p.handleOffer(msg)
 
 	default:

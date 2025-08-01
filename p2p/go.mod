@@ -1,6 +1,6 @@
 module github.com/aabiji/drip/p2p
 
-go 1.24.4
+go 1.24.2
 
 require (
 	github.com/edsrzf/mmap-go v1.2.0

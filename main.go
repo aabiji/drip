@@ -12,7 +12,7 @@ func main() {
 		var ops op.Ops
 		window := new(app.Window)
 		e := explorer.NewExplorer(window)
-		ui := NewUI(e)
+		a := NewApp(e)
 
 		for {
 			switch event := window.Event().(type) {
@@ -20,7 +20,7 @@ func main() {
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, event)
-				ui.DrawFrame(gtx)
+				a.ui.DrawFrame(gtx)
 				event.Frame(gtx.Ops)
 			}
 		}

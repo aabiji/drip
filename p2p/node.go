@@ -13,33 +13,38 @@ type Node struct {
 	sender     Sender
 	finder     PeerFinder
 	peers      map[string]*PeerConnection
-
-	ctx    context.Context
-	cancel context.CancelFunc
-	events chan Message
-	port   int
+	port       int
+	ctx        context.Context
 }
 
-// TODO: shutdown function
 func NewNode(
+	ctx context.Context,
 	downloadFolder *string,
 	authorize AuthorizeCallback,
 	notify NotifyCallback,
 ) *Node {
-	ctx, cancel := context.WithCancel(context.Background())
-	events := make(chan Message)
-	port := getUnusedPort()
-
 	n := &Node{
 		downloader: NewDownloader(downloadFolder, authorize, notify),
 		peers:      make(map[string]*PeerConnection),
-		port:       port,
+		port:       getUnusedPort(),
 		ctx:        ctx,
-		cancel:     cancel,
-		events:     events,
 	}
-	n.finder = NewPeerFinder(port, ctx, n.addPeer, n.removePeer)
+
+	n.finder = NewPeerFinder(n.port, ctx, n.addPeer, n.removePeer)
+	go func() {
+		if err := n.finder.Run(); err != nil {
+			panic(err)
+		}
+	}()
 	return n
+}
+
+// TODO: is this comprehensive?
+func (n *Node) Shutdown() {
+	n.downloader.Close()
+	for _, peer := range n.peers {
+		peer.Close()
+	}
 }
 
 func (n *Node) handleTransferMessage(msg Message, handler ReplyHandler) {

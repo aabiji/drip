@@ -6,6 +6,7 @@ require (
 	gioui.org v0.8.0
 	gioui.org/x v0.8.1
 	github.com/aabiji/drip/p2p v0.0.0-00010101000000-000000000000
+	github.com/kirsle/configdir v0.0.0-20170128060238-e45d2f54772f
 	golang.org/x/exp/shiny v0.0.0-20250718183923-645b1fa84792
 )
 

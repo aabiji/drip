@@ -2,29 +2,39 @@ package main
 
 import (
 	"fmt"
+	"context"
 	"gioui.org/x/explorer"
 	"github.com/aabiji/drip/p2p"
 )
 
-type Settings struct {
-	downloadFolder string
-	trustPeers     bool
-	notifyUser     bool
-	lightmode      bool
-}
-
 type App struct {
 	node     *p2p.Node
+	ui       *UI
 	settings Settings
-	ui       UI
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewApp(e *explorer.Explorer) App {
-	settings := Settings{}
-	app := App{settings: settings, ui: *NewUI(e)}
-	app.node = p2p.NewNode(
-		&settings.downloadFolder, app.askForAuth, app.notifyTransfer)
+	settings := loadSettings()
+	ctx, cancel := context.WithCancel(context.Background())
+
+	app := App{
+		settings: settings,
+		ui: NewUI(e),
+		ctx: ctx, cancel: cancel,
+	}
+	app.node = p2p.NewNode(ctx, &settings.DownloadFolder,
+	app.askForAuth, app.notifyTransfer)
 	return app
+}
+
+// TODO: run on close
+func (app *App) Shutdown() {
+	saveSettings(app.settings)
+	app.cancel()
+	app.node.Shutdown()
 }
 
 func (app App) askForAuth(peerId string) bool {

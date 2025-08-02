@@ -1,38 +1,38 @@
 package main
 
 import (
-	"fmt"
 	"context"
+	"fmt"
+
 	"gioui.org/x/explorer"
+	"gioui.org/x/notify"
+
 	"github.com/aabiji/drip/p2p"
 )
 
 type App struct {
-	node     *p2p.Node
-	ui       *UI
-	settings Settings
+	node *p2p.Node
+	ui   *UI
 
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
 func NewApp(e *explorer.Explorer) App {
-	settings := loadSettings()
 	ctx, cancel := context.WithCancel(context.Background())
 
 	app := App{
-		settings: settings,
-		ui: NewUI(e),
+		ui:  NewUI(e),
 		ctx: ctx, cancel: cancel,
 	}
-	app.node = p2p.NewNode(ctx, &settings.DownloadFolder,
-	app.askForAuth, app.notifyTransfer)
+	app.node = p2p.NewNode(ctx, &app.ui.settings.DownloadPath,
+		app.askForAuth, app.notifyTransfer)
+
 	return app
 }
 
-// TODO: run on close
 func (app *App) Shutdown() {
-	saveSettings(app.settings)
+	saveSettings(app.ui.settings)
 	app.cancel()
 	app.node.Shutdown()
 }
@@ -43,5 +43,15 @@ func (app App) askForAuth(peerId string) bool {
 }
 
 func (app App) notifyTransfer(peerId string, numFiles int) {
-	fmt.Printf("Got %d files from %s\n", numFiles, peerId)
+	notifier, _ := notify.NewNotifier()
+	msg := fmt.Sprintf("Got %d files from %s\n", numFiles, peerId)
+	_, _ = notifier.CreateNotification("Transfer status", msg)
 }
+
+/*
+	_, err = readCloser.Read(entry.data)
+	if err != nil {
+		continue
+	}
+	readCloser.Close()
+*/

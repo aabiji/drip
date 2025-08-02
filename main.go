@@ -17,6 +17,7 @@ func main() {
 		for {
 			switch event := window.Event().(type) {
 			case app.DestroyEvent:
+				a.Shutdown()
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, event)

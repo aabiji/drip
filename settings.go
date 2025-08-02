@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"gioui.org/widget"
 	"github.com/kirsle/configdir"
 	"io"
 	"os"
@@ -10,10 +11,10 @@ import (
 )
 
 type Settings struct {
-	DownloadFolder    string
-	TrustPeers        bool
-	ShowNotifications bool
-	LightMode         bool
+	DownloadPath string
+	TrustPeers   widget.Bool
+	NotifyUser   widget.Bool
+	LightMode    widget.Bool
 }
 
 func configPath() string {
@@ -43,10 +44,10 @@ func loadSettings() Settings {
 	defaultFolder := filepath.Join(home, "Downloads")
 
 	settings := Settings{
-		LightMode:         true,
-		TrustPeers:        true,
-		ShowNotifications: true,
-		DownloadFolder:    defaultFolder,
+		LightMode:    widget.Bool{Value: true},
+		TrustPeers:   widget.Bool{Value: true},
+		NotifyUser:   widget.Bool{Value: true},
+		DownloadPath: defaultFolder,
 	}
 
 	file, err := os.Open(configPath())
@@ -62,8 +63,8 @@ func loadSettings() Settings {
 		panic(err)
 	}
 
-	if len(strings.TrimSpace(settings.DownloadFolder)) == 0 {
-		settings.DownloadFolder = defaultFolder
+	if len(strings.TrimSpace(settings.DownloadPath)) == 0 {
+		settings.DownloadPath = defaultFolder
 	}
 	return settings
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -45,49 +46,34 @@ const (
 
 type C = layout.Context
 type D = layout.Dimensions
-type T = *material.Theme
 
-type FolderEntry struct {
+type Item struct {
 	name      string
 	clickable widget.Clickable
-}
+	check     widget.Bool
 
-type FileEntry struct {
-	name      string
-	size      int64
-	data      []byte
-	progress  float32
-	clickable widget.Clickable
-}
-
-type Peer struct {
-	name  string
-	check widget.Bool
+	// file info
+	rc       io.ReadCloser
+	size     int64
+	progress *float32
 }
 
 type UI struct {
-	picker *explorer.Explorer
-	styles Styles
+	settings Settings
+	styles   Styles
+	picker   *explorer.Explorer
 
 	peersList   *widget.List
+	peers       []Item
 	foldersList *widget.List
+	folders     []Item
 	filesList   *widget.List
+	files       []Item
 
-	errors    []error
-	files     []FileEntry
-	folders   []FolderEntry
-	peers     []Peer
-	icons     []*widget.Icon
-	buttons   []widget.Clickable
-	errClicks []widget.Clickable
-
-	trustPeers widget.Bool
-	notifyUser widget.Bool
-	lightMode  widget.Bool
-
-	selectedPeers map[string]bool
-	downloadPath  string
-	currentPage   int
+	errors      []Item
+	icons       []*widget.Icon
+	buttons     []widget.Clickable
+	currentPage int
 }
 
 func NewUI(e *explorer.Explorer) *UI {
@@ -98,19 +84,14 @@ func NewUI(e *explorer.Explorer) *UI {
 			List: layout.List{Axis: layout.Vertical}},
 		foldersList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
-		buttons:       make([]widget.Clickable, BTNS_END-BTNS_START),
-		styles:        NewStyles(false),
-		selectedPeers: make(map[string]bool),
-		currentPage:   HOME_PAGE,
-		picker:        e,
+		buttons:     make([]widget.Clickable, BTNS_END-BTNS_START),
+		settings:    loadSettings(),
+		currentPage: HOME_PAGE,
+		picker:      e,
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		panic(err)
-	}
-	ui.downloadPath = filepath.Join(home, "Downloads")
 	ui.setupFolderList()
+	ui.styles = NewStyles(ui.settings.LightMode.Value)
 
 	iconBytes := [][]byte{
 		icons.NavigationArrowBack, icons.ActionSettings,
@@ -127,8 +108,7 @@ func NewUI(e *explorer.Explorer) *UI {
 }
 
 func (ui *UI) AddError(err error) {
-	ui.errors = append(ui.errors, err)
-	ui.errClicks = append(ui.errClicks, widget.Clickable{})
+	ui.errors = append(ui.errors, Item{name: err.Error()})
 }
 
 func (ui *UI) addFiles() {
@@ -138,8 +118,6 @@ func (ui *UI) addFiles() {
 	}
 
 	for _, readCloser := range selection {
-		defer readCloser.Close()
-
 		file, ok := readCloser.(fs.File)
 		if !ok {
 			panic("platform doesn't support file metadata")
@@ -150,12 +128,8 @@ func (ui *UI) addFiles() {
 			panic(err)
 		}
 
-		entry := FileEntry{name: info.Name(), size: info.Size(), progress: -1}
-		_, err = readCloser.Read(entry.data)
-		if err != nil {
-			continue
-		}
-		ui.files = append(ui.files, entry)
+		ui.files = append(ui.files, Item{name: info.Name(), size: info.Size()})
+		readCloser.Close()
 	}
 }
 
@@ -171,16 +145,16 @@ func isWriteable(folderPath string) bool {
 }
 
 func (ui *UI) setupFolderList() {
-	entries, err := os.ReadDir(ui.downloadPath)
+	entries, err := os.ReadDir(ui.settings.DownloadPath)
 	if err != nil {
 		panic(err)
 	}
 
 	ui.folders = nil
 	for _, entry := range entries {
-		fullpath := filepath.Join(ui.downloadPath, entry.Name())
+		fullpath := filepath.Join(ui.settings.DownloadPath, entry.Name())
 		if entry.IsDir() && isWriteable(fullpath) {
-			ui.folders = append(ui.folders, FolderEntry{name: entry.Name()})
+			ui.folders = append(ui.folders, Item{name: entry.Name()})
 		}
 	}
 }
@@ -206,9 +180,8 @@ func (ui *UI) handleInputs(gtx C) {
 	}
 
 	for i := len(ui.errors) - 1; i >= 0; i-- { // handle removing errors
-		if ui.errClicks[i].Clicked(gtx) {
+		if ui.errors[i].clickable.Clicked(gtx) {
 			ui.errors = append(ui.errors[:i], ui.errors[i+1:]...)
-			ui.errClicks = append(ui.errClicks[:i], ui.errClicks[i+1:]...)
 		}
 	}
 
@@ -218,24 +191,17 @@ func (ui *UI) handleInputs(gtx C) {
 		}
 	}
 
-	for i := len(ui.peers) - 1; i >= 0; i-- { // handle peer selection
-		if ui.peers[i].check.Value {
-			ui.selectedPeers[ui.peers[i].name] = true
-		} else {
-			delete(ui.selectedPeers, ui.peers[i].name)
-		}
-	}
-
 	for i := 0; i < len(ui.folders); i++ { // navigate folders
 		if ui.folders[i].clickable.Clicked(gtx) {
-			ui.downloadPath = filepath.Join(ui.downloadPath, ui.folders[i].name)
+			ui.settings.DownloadPath =
+				filepath.Join(ui.settings.DownloadPath, ui.folders[i].name)
 			ui.setupFolderList()
 			break
 		}
 	}
 
 	if ui.buttons[BACK_BTN].Clicked(gtx) {
-		ui.downloadPath = filepath.Dir(ui.downloadPath)
+		ui.settings.DownloadPath = filepath.Dir(ui.settings.DownloadPath)
 		ui.setupFolderList() // navigate one folder back up
 	} else if ui.buttons[SELECT_BTN].Clicked(gtx) {
 		ui.currentPage = SETTINGS_PAGE // close the folder picker
@@ -247,8 +213,8 @@ func (ui *UI) handleInputs(gtx C) {
 		go func() { ui.addFiles() }()
 	}
 
-	if ui.lightMode.Update(gtx) { // toggle theme
-		ui.styles = NewStyles(ui.lightMode.Value)
+	if ui.settings.LightMode.Update(gtx) { // toggle theme
+		ui.styles = NewStyles(ui.settings.LightMode.Value)
 	}
 }
 
@@ -350,11 +316,11 @@ func (ui *UI) drawErrorContainer(gtx C) D {
 							}.Layout(gtx,
 								layout.Rigid(func(gtx C) D {
 									return Text(gtx, ui.styles,
-										ui.errors[i].Error(), 18, true)
+										ui.errors[i].name, 18, true)
 								}),
 								layout.Rigid(func(gtx C) D {
 									return IconButton(gtx, ui.styles,
-										20, true, &ui.errClicks[i],
+										20, true, &ui.errors[i].clickable,
 										ui.icons[CLOSE_ICON])
 								}),
 							)
@@ -371,9 +337,9 @@ func (ui *UI) drawErrorContainer(gtx C) D {
 	}.Layout(gtx, widgets...)
 }
 
-func (ui *UI) drawFileEntry(gtx C, file *FileEntry) D {
+func (ui *UI) drawFileEntry(gtx C, file *Item) D {
 	padding := layout.Inset{Top: unit.Dp(16), Right: unit.Dp(16)}
-	if file.progress <= 0 {
+	if file.progress == nil {
 		// since there wouldn't be a progress bar at the bottom
 		padding.Bottom = unit.Dp(16)
 	}
@@ -402,7 +368,7 @@ func (ui *UI) drawFileEntry(gtx C, file *FileEntry) D {
 							})
 					}),
 					layout.Rigid(func(gtx C) D {
-						if file.progress < 0 {
+						if file.progress == nil {
 							return IconButton(gtx, ui.styles, 20, false,
 								&file.clickable, ui.icons[CLOSE_ICON])
 						}
@@ -412,10 +378,10 @@ func (ui *UI) drawFileEntry(gtx C, file *FileEntry) D {
 				)
 			}),
 			layout.Rigid(func(gtx C) D {
-				if file.progress >= 0 {
+				if file.progress != nil {
 					return layout.Inset{
 						Top: unit.Dp(8)}.Layout(gtx, func(gtx C) D {
-						return ProgressBar(gtx, ui.styles, file.progress)
+						return ProgressBar(gtx, ui.styles, *file.progress)
 					})
 				}
 				// empty space so layout doesn't collapse
@@ -495,7 +461,14 @@ func (ui *UI) drawHomePage(gtx C) D {
 
 	widgets = append(widgets,
 		layout.Rigid(func(gtx C) D {
-			disabled := len(ui.files) == 0 || len(ui.selectedPeers) == 0
+			noPeersSelected := true
+			for _, peer := range ui.peers {
+				if peer.check.Value {
+					noPeersSelected = false
+					break
+				}
+			}
+			disabled := len(ui.files) == 0 || noPeersSelected
 			return TextButton(gtx, ui.styles, "Send files", 18, false, disabled,
 				true, &ui.buttons[SEND_BTN])
 		}),
@@ -540,15 +513,15 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 		Alignment: layout.Middle,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx C) D { // toggle theme
-			return Checkbox(gtx, ui.styles, &ui.lightMode,
+			return Checkbox(gtx, ui.styles, &ui.settings.LightMode,
 				ui.icons[CHECK_ICON], "Dark mode")
 		}),
 		layout.Rigid(func(gtx C) D { // show notifications
-			return Checkbox(gtx, ui.styles, &ui.notifyUser,
+			return Checkbox(gtx, ui.styles, &ui.settings.NotifyUser,
 				ui.icons[CHECK_ICON], "Show notifications")
 		}),
 		layout.Rigid(func(gtx C) D { // trust peers
-			return Checkbox(gtx, ui.styles, &ui.trustPeers,
+			return Checkbox(gtx, ui.styles, &ui.settings.TrustPeers,
 				ui.icons[CHECK_ICON], "Trust previous senders")
 		}),
 		layout.Rigid(func(gtx C) D { // choose download path
@@ -559,7 +532,7 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 					return Text(gtx, ui.styles, "Download path", 20, false)
 				}),
 				layout.Flexed(0.5, func(gtx C) D {
-					return TextButton(gtx, ui.styles, ui.downloadPath,
+					return TextButton(gtx, ui.styles, ui.settings.DownloadPath,
 						16, true, false, true, &ui.buttons[PATH_BTN])
 				}),
 			)
@@ -596,9 +569,10 @@ func (ui *UI) drawFolderPicker(gtx C) D {
 					Alignment: layout.Middle,
 				}.Layout(gtx,
 					layout.Rigid(func(gtx C) D {
-						proportional := 20 - (0.1 * float32(len(ui.downloadPath)))
+						proportional :=
+							20 - (0.1 * float32(len(ui.settings.DownloadPath)))
 						size := int(max(12, proportional))
-						return Text(gtx, ui.styles, ui.downloadPath, size, false)
+						return Text(gtx, ui.styles, ui.settings.DownloadPath, size, false)
 					}),
 
 					layout.Rigid(func(gtx C) D {

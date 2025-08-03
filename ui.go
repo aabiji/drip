@@ -22,6 +22,7 @@ const (
 	SETTINGS_PAGE
 	PROGRESS_PAGE
 	PICKER_PAGE
+	AUTH_PAGE
 )
 
 const (
@@ -41,6 +42,8 @@ const (
 	PAGE_BTN
 	BACK_BTN
 	SELECT_BTN
+	ACCEPT
+	DENY
 	BTNS_END
 )
 
@@ -91,7 +94,7 @@ func NewUI(e *explorer.Explorer) *UI {
 	}
 
 	ui.setupFolderList()
-	ui.styles = NewStyles(ui.settings.LightMode.Value)
+	ui.styles = NewStyles(ui.settings.DarkMode.Value)
 
 	iconBytes := [][]byte{
 		icons.NavigationArrowBack, icons.ActionSettings,
@@ -213,8 +216,8 @@ func (ui *UI) handleInputs(gtx C) {
 		go func() { ui.addFiles() }()
 	}
 
-	if ui.settings.LightMode.Update(gtx) { // toggle theme
-		ui.styles = NewStyles(ui.settings.LightMode.Value)
+	if ui.settings.DarkMode.Update(gtx) { // toggle theme
+		ui.styles = NewStyles(ui.settings.DarkMode.Value)
 	}
 }
 
@@ -284,6 +287,13 @@ func (ui *UI) DrawFrame(gtx C) {
 			}
 			return ui.drawFolderPicker(gtx)
 		}),
+
+		layout.Stacked(func(gtx C) D { // auth transfer modal
+			if ui.currentPage != AUTH_PAGE {
+				return layout.Dimensions{}
+			}
+			return ui.drawPermissionPage(gtx)
+		}),
 	)
 }
 
@@ -306,7 +316,7 @@ func (ui *UI) drawErrorContainer(gtx C) D {
 					width:        100,
 					height:       35,
 				}.Layout(gtx, func(gtx C) D {
-					return layout.Center.Layout(gtx,
+					return XCentered(gtx, false,
 						func(gtx layout.Context) D {
 							gtx.Constraints.Min.X = gtx.Constraints.Max.X
 							return layout.Flex{
@@ -404,7 +414,7 @@ func (ui *UI) drawUploadButton(gtx C) D {
 		roundedBorder: true,
 		clickable:     &ui.buttons[UPLOAD_BTN],
 	}.Layout(gtx, func(gtx C) D {
-		return layout.Center.Layout(gtx, func(gtx C) D {
+		return XCentered(gtx, false, func(gtx C) D {
 			return layout.Flex{
 				Alignment: layout.Middle,
 				Axis:      layout.Vertical,
@@ -490,7 +500,7 @@ func (ui *UI) drawProgressPage(gtx C) D {
 		layout.Rigid(func(gtx C) D {
 			return layout.Inset{Bottom: unit.Dp(20)}.Layout(gtx,
 				func(gtx C) D {
-					return layout.Center.Layout(gtx, func(gtx C) D {
+					return XCentered(gtx, false, func(gtx C) D {
 						return Text(gtx, ui.styles,
 							"Sending files", 40, false)
 					})
@@ -513,7 +523,7 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 		Alignment: layout.Middle,
 	}.Layout(gtx,
 		layout.Rigid(func(gtx C) D { // toggle theme
-			return Checkbox(gtx, ui.styles, &ui.settings.LightMode,
+			return Checkbox(gtx, ui.styles, &ui.settings.DarkMode,
 				ui.icons[CHECK_ICON], "Dark mode")
 		}),
 		layout.Rigid(func(gtx C) D { // show notifications
@@ -539,7 +549,7 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 		}),
 		layout.Rigid(func(gtx C) D { // copyright
 			return layout.Inset{Top: unit.Dp(20)}.Layout(gtx, func(gtx C) D {
-				return layout.Center.Layout(gtx, func(gtx C) D {
+				return XCentered(gtx, false, func(gtx C) D {
 					return Text(gtx, ui.styles, getCopyright(), 14, false)
 				})
 			})
@@ -596,5 +606,42 @@ func (ui *UI) drawFolderPicker(gtx C) D {
 				)
 			}),
 		)
+	})
+}
+
+func (ui *UI) drawPermissionPage(gtx C) D {
+	return Modal(gtx, ui.styles, func(gtx C) D {
+		return XCentered(gtx, true, func(gtx C) D {
+			return layout.Flex{
+				Axis:      layout.Vertical,
+				Spacing:   layout.SpaceStart,
+				Alignment: layout.Middle,
+			}.Layout(gtx,
+				layout.Rigid(func(gtx C) D {
+					return XCentered(gtx, false, func(gtx C) D {
+						msg := "Accept 10 files from Peer X?"
+						return Text(gtx, ui.styles, msg, 30, false)
+					})
+				}),
+
+				layout.Rigid(func(gtx C) D {
+					return layout.Spacer{Height: unit.Dp(30)}.Layout(gtx)
+				}),
+
+				layout.Rigid(func(gtx C) D {
+					return TextButton(gtx, ui.styles, "Yes", 18,
+						false, false, true, &ui.buttons[ACCEPT])
+				}),
+
+				layout.Rigid(func(gtx C) D {
+					return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
+				}),
+
+				layout.Rigid(func(gtx C) D {
+					return TextButton(gtx, ui.styles, "No", 18,
+						true, false, true, &ui.buttons[DENY])
+				}),
+			)
+		})
 	})
 }

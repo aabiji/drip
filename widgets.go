@@ -93,6 +93,15 @@ func NewStyles(darkMode bool) Styles {
 	return base
 }
 
+func XCentered(gtx C, fullWidth bool, w layout.Widget) D {
+	return layout.Center.Layout(gtx, func(gtx C) D {
+		if fullWidth {
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		}
+		return w(gtx)
+	})
+}
+
 func Text(gtx C, styles Styles, text string, size int, invert bool) D {
 	style := material.Label(styles.theme, unit.Sp(size), text)
 	style.Color = styles.fg500

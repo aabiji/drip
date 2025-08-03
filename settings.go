@@ -14,7 +14,7 @@ type Settings struct {
 	DownloadPath string
 	TrustPeers   widget.Bool
 	NotifyUser   widget.Bool
-	LightMode    widget.Bool
+	DarkMode     widget.Bool
 }
 
 func configPath() string {
@@ -44,7 +44,7 @@ func loadSettings() Settings {
 	defaultFolder := filepath.Join(home, "Downloads")
 
 	settings := Settings{
-		LightMode:    widget.Bool{Value: true},
+		DarkMode:     widget.Bool{Value: false},
 		TrustPeers:   widget.Bool{Value: true},
 		NotifyUser:   widget.Bool{Value: true},
 		DownloadPath: defaultFolder,

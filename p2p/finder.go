@@ -50,23 +50,11 @@ func NewPeerFinder(
 	}
 }
 
-func deviceIP() net.IP {
-	// get the prefered outbound ip address of this device
-	conn, err := net.Dial("udp", "8.8.8.8:80")
-	if err != nil {
-		panic(err) // getting the ip is a must
-	}
-	defer conn.Close()
-
-	localAddr := conn.LocalAddr().(*net.UDPAddr)
-	return localAddr.IP
-}
-
 func (f *PeerFinder) broadcastOurService() error {
-	hostname := fmt.Sprintf("%s.local.", getDeviceName())
+	hostname := fmt.Sprintf("%s.local.", deviceName())
 
 	service, err := mdns.NewMDNSService(
-		getDeviceName(), f.serviceType, "local.", hostname,
+		deviceName(), f.serviceType, "local.", hostname,
 		f.devicePort, []net.IP{deviceIP()}, []string{})
 	if err != nil {
 		return err
@@ -78,7 +66,7 @@ func (f *PeerFinder) broadcastOurService() error {
 
 func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 	peerId := strings.Split(entry.Host, ".")[0]
-	if peerId == getDeviceName() {
+	if peerId == deviceName() {
 		return
 	}
 

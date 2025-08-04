@@ -10,7 +10,6 @@ import (
 )
 
 type PeerConnection struct {
-	id          string
 	makingOffer bool
 	polite      bool
 
@@ -18,16 +17,20 @@ type PeerConnection struct {
 	dataChannel *webrtc.DataChannel
 	server      TcpServer
 
-	ctx             context.Context
-	cancel          context.CancelFunc
-	transferHandler TransferMessageHandler
+	// queue for messages to be sent over the data channel
+	PendingSending chan Message
+	// handles the messages received from the data channel
+	msgHandler func(Message)
+
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 func NewPeer(
 	ip net.IP, id string,
 	devicePort int, port int,
 	parentCtx context.Context,
-	handler TransferMessageHandler,
+	handler func(Message),
 ) *PeerConnection {
 	ourAddr := fmt.Sprintf(":%d", devicePort)
 	peerAddr := fmt.Sprintf("%s:%d", ip.String(), port)
@@ -38,21 +41,23 @@ func NewPeer(
 	// Being impolite will mean we ignore the peer's offer and continue with
 	// our own. This way, we avoid collisions by knowing that only one peer
 	// is able to initiate a connection
-	polite := id < getDeviceName()
+	polite := id < deviceName()
 
 	return &PeerConnection{
-		makingOffer:     false,
-		polite:          polite,
-		server:          NewTcpServer(ourAddr, peerAddr, ctx),
-		ctx:             ctx,
-		cancel:          cancel,
-		transferHandler: handler,
+		makingOffer:    false,
+		polite:         polite,
+		server:         NewTcpServer(ourAddr, peerAddr, ctx),
+		PendingSending: make(chan Message, 100),
+		ctx:            ctx,
+		cancel:         cancel,
+		msgHandler:     handler,
 	}
 }
 
 // Will also call the dataChannel's OnClose
 func (p *PeerConnection) Close() {
 	p.cancel()
+	close(p.PendingSending)
 	if p.connection != nil {
 		p.connection.Close()
 		p.connection = nil
@@ -110,29 +115,30 @@ func (p *PeerConnection) CreateConnection() {
 	})
 }
 
-func (p *PeerConnection) handleReceivingData() {
-	p.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
-		msg := GetMessage(channelMsg.Data)
-		if msg.SenderId == getDeviceName() {
-			return // ignore our own messages
-		}
-
-		p.transferHandler(msg, func(reply *Message) {
-			if reply != nil {
-				p.dataChannel.Send(reply.Serialize())
-			}
-		})
-	})
-}
-
 func (p *PeerConnection) SetupDataChannels() {
 	go func() { p.server.ForwardMessages() }()
 	go func() { p.server.ReceiveMessages(p.handlePeerMessage) }()
 
+	receiveHandler := func() {
+		p.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
+			msg := GetMessage(channelMsg.Data)
+			if msg.Sender != deviceName() {
+				p.msgHandler(msg)
+			}
+		})
+	}
+
+	sendHandler := func() {
+		for msg := range p.PendingSending {
+			p.dataChannel.Send(msg.Serialize())
+		}
+	}
+
 	if p.polite {
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
 			p.dataChannel = dataChannel
-			p.handleReceivingData()
+			receiveHandler()
+			go sendHandler()
 			log.Println("Accepting a data channel -- responder")
 		})
 	} else {
@@ -141,7 +147,8 @@ func (p *PeerConnection) SetupDataChannels() {
 		if err != nil {
 			panic(err)
 		}
-		p.handleReceivingData()
+		receiveHandler()
+		go sendHandler()
 		log.Println("Creating a data channel -- initiator")
 	}
 }
@@ -177,7 +184,7 @@ func (p *PeerConnection) handleOffer(msg Message) {
 }
 
 func (p *PeerConnection) handlePeerMessage(msg Message) {
-	switch msg.MessageType {
+	switch msg.Type {
 	case ANSWER_TCP_PACKET:
 		answer, err := Deserialize[webrtc.SessionDescription](msg)
 		if err != nil {

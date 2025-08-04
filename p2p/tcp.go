@@ -10,6 +10,12 @@ import (
 	"time"
 )
 
+const ( // message types
+	OFFER_TCP_PACKET = iota
+	ANSWER_TCP_PACKET
+	ICE_TCP_PACKET
+)
+
 type TcpServer struct {
 	packets  chan Message
 	closed   bool
@@ -17,8 +23,6 @@ type TcpServer struct {
 	ourAddr  string
 	ctx      context.Context
 }
-
-type MessageHandler func(Message)
 
 func NewTcpServer(
 	ourAddr string, peerAddr string,
@@ -108,7 +112,7 @@ dialoop:
 	}
 }
 
-func (t *TcpServer) handleConnection(conn net.Conn, handler MessageHandler) {
+func (t *TcpServer) handleConnection(conn net.Conn, handler func(Message)) {
 	defer conn.Close()
 	for {
 		select {
@@ -128,7 +132,7 @@ func (t *TcpServer) handleConnection(conn net.Conn, handler MessageHandler) {
 	}
 }
 
-func (t *TcpServer) ReceiveMessages(handler MessageHandler) {
+func (t *TcpServer) ReceiveMessages(handler func(Message)) {
 	listener, err := net.Listen("tcp", t.ourAddr)
 	if err != nil {
 		panic(err)

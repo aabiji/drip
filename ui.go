@@ -62,16 +62,17 @@ type Item struct {
 }
 
 type UI struct {
-	settings Settings
-	styles   Styles
-	picker   *explorer.Explorer
+	settings     *Settings
+	picker       *explorer.Explorer
+	sendCallback func()
+	styles       Styles
 
-	peersList   *widget.List
-	peers       []Item
-	foldersList *widget.List
-	folders     []Item
-	filesList   *widget.List
-	files       []Item
+	recipientsList *widget.List
+	recipients     []Item
+	foldersList    *widget.List
+	folders        []Item
+	filesList      *widget.List
+	files          []Item
 
 	errors      []Item
 	icons       []*widget.Icon
@@ -79,18 +80,18 @@ type UI struct {
 	currentPage int
 }
 
-func NewUI(e *explorer.Explorer) *UI {
+func NewUI(s *Settings, sendCallback func()) *UI {
 	ui := &UI{
-		peersList: &widget.List{
+		recipientsList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
 		filesList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
 		foldersList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
-		buttons:     make([]widget.Clickable, BTNS_END-BTNS_START),
-		settings:    loadSettings(),
-		currentPage: HOME_PAGE,
-		picker:      e,
+		buttons:      make([]widget.Clickable, BTNS_END-BTNS_START),
+		sendCallback: sendCallback,
+		currentPage:  HOME_PAGE,
+		settings:     s,
 	}
 
 	ui.setupFolderList()
@@ -112,6 +113,17 @@ func NewUI(e *explorer.Explorer) *UI {
 
 func (ui *UI) AddError(err error) {
 	ui.errors = append(ui.errors, Item{name: err.Error()})
+}
+
+func (ui *UI) sendBtnDisabled() bool {
+	noPeersSelected := true
+	for _, peer := range ui.recipients {
+		if peer.check.Value {
+			noPeersSelected = false
+			break
+		}
+	}
+	return len(ui.files) == 0 || noPeersSelected
 }
 
 func (ui *UI) addFiles() {
@@ -201,6 +213,10 @@ func (ui *UI) handleInputs(gtx C) {
 			ui.setupFolderList()
 			break
 		}
+	}
+
+	if !ui.sendBtnDisabled() && ui.buttons[SEND_BTN].Clicked(gtx) {
+		ui.sendCallback()
 	}
 
 	if ui.buttons[BACK_BTN].Clicked(gtx) {
@@ -436,18 +452,18 @@ func (ui *UI) drawUploadButton(gtx C) D {
 
 func (ui *UI) drawPeersList() layout.FlexChild {
 	widget := func(gtx C) D {
-		if len(ui.peers) == 0 {
-			return Spinner(gtx, ui.styles, "Looking for peers...")
+		if len(ui.recipients) == 0 {
+			return Spinner(gtx, ui.styles, "Looking for recipients...")
 		}
 
-		return material.List(ui.styles.theme, ui.peersList).Layout(gtx, len(ui.peers),
+		return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx, len(ui.recipients),
 			func(gtx C, i int) D {
-				return Checkbox(gtx, ui.styles, &ui.peers[i].check,
-					ui.icons[CHECK_ICON], ui.peers[i].name)
+				return Checkbox(gtx, ui.styles, &ui.recipients[i].check,
+					ui.icons[CHECK_ICON], ui.recipients[i].name)
 			})
 	}
 
-	if len(ui.peers) > 0 {
+	if len(ui.recipients) > 0 {
 		return layout.Flexed(0.5, widget)
 	}
 	return layout.Rigid(widget)
@@ -471,16 +487,8 @@ func (ui *UI) drawHomePage(gtx C) D {
 
 	widgets = append(widgets,
 		layout.Rigid(func(gtx C) D {
-			noPeersSelected := true
-			for _, peer := range ui.peers {
-				if peer.check.Value {
-					noPeersSelected = false
-					break
-				}
-			}
-			disabled := len(ui.files) == 0 || noPeersSelected
-			return TextButton(gtx, ui.styles, "Send files", 18, false, disabled,
-				true, &ui.buttons[SEND_BTN])
+			return TextButton(gtx, ui.styles, "Send files", 18, false,
+				ui.sendBtnDisabled(), true, &ui.buttons[SEND_BTN])
 		}),
 	)
 
@@ -530,7 +538,7 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 			return Checkbox(gtx, ui.styles, &ui.settings.NotifyUser,
 				ui.icons[CHECK_ICON], "Show notifications")
 		}),
-		layout.Rigid(func(gtx C) D { // trust peers
+		layout.Rigid(func(gtx C) D { // trust recipients
 			return Checkbox(gtx, ui.styles, &ui.settings.TrustPeers,
 				ui.icons[CHECK_ICON], "Trust previous senders")
 		}),

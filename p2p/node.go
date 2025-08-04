@@ -1,33 +1,23 @@
 package p2p
 
-import (
-	"context"
-	"fmt"
-	"math/rand"
-	"net"
-	"os"
-)
+import "context"
 
 type Node struct {
-	downloader Downloader
-	sender     Sender
-	finder     PeerFinder
-	peers      map[string]*PeerConnection
-	port       int
-	ctx        context.Context
+	sender   Sender
+	receiver Receiver
+	finder   PeerFinder
+	peers    map[string]*PeerConnection
+	ctx      context.Context
+	port     int
 }
 
-func NewNode(
-	ctx context.Context,
-	downloadFolder *string,
-	authorize AuthorizeCallback,
-	notify NotifyCallback,
-) *Node {
+func NewNode(ctx context.Context, downloadFolder *string) *Node {
 	n := &Node{
-		downloader: NewDownloader(downloadFolder, authorize, notify),
-		peers:      make(map[string]*PeerConnection),
-		port:       getUnusedPort(),
-		ctx:        ctx,
+		sender:   NewSender(),
+		receiver: NewReceiver(downloadFolder),
+		peers:    make(map[string]*PeerConnection),
+		port:     getUnusedPort(),
+		ctx:      ctx,
 	}
 
 	n.finder = NewPeerFinder(n.port, ctx, n.addPeer, n.removePeer)
@@ -39,28 +29,27 @@ func NewNode(
 	return n
 }
 
-// TODO: is this comprehensive?
+func (n *Node) SendFiles(recipients []string, files map[string]*File) {
+	n.sender.StartTransfer(recipients, files, n.sendMsg)
+}
+
 func (n *Node) Shutdown() {
-	n.downloader.Close()
+	n.receiver.Close()
 	for _, peer := range n.peers {
 		peer.Close()
 	}
 }
 
-func (n *Node) handleTransferMessage(msg Message, handler ReplyHandler) {
-	if msg.MessageType == TRANSFER_SESSION_AUTH {
-		n.sender.handlePeerResponse(msg)
-		handler(nil)
-	} else {
-		reply := n.downloader.ReceiveMessage(msg)
-		handler(reply)
+func (n *Node) sendMsg(msg Message) {
+	for _, peer := range msg.Recipients {
+		n.peers[peer].PendingSending <- msg
 	}
 }
 
 func (n *Node) addPeer(info PeerInfo) {
 	peer := NewPeer(
 		info.ip, info.id, n.port, info.port,
-		n.ctx, n.handleTransferMessage)
+		n.ctx, n.handlePeerMessage)
 	peer.CreateConnection()
 	peer.SetupDataChannels()
 	n.peers[info.id] = peer
@@ -69,38 +58,40 @@ func (n *Node) addPeer(info PeerInfo) {
 func (n *Node) removePeer(peerId string) {
 	n.peers[peerId].Close()
 	delete(n.peers, peerId)
-	n.downloader.CancelSessions(peerId)
+	n.receiver.Cancel(peerId)
 }
 
-func getUnusedPort() int {
-	// get the os to give a random free port
-	addr := &net.UDPAddr{IP: net.IPv4zero, Port: 0}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		panic(err)
+func (n *Node) handlePeerMessage(msg Message) {
+	switch msg.Type {
+	case TRANSFER_RESPONSE:
+		response, err := Deserialize[TransferResponse](msg)
+		if err != nil {
+			panic(err)
+		}
+		n.sender.HandleTransferResponse(msg.Sender, response, n.sendMsg)
+	case TRANSFER_REQUEST:
+		id, err := Deserialize[string](msg)
+		if err != nil {
+			panic(err)
+		}
+		n.receiver.HandleRequest(id)
+	case TRANSFER_INFO:
+		info, err := Deserialize[Transfer](msg)
+		if err != nil {
+			panic(err)
+		}
+		n.receiver.HandleInfo(info)
+	case TRANSFER_CHUNK:
+		chunk, err := Deserialize[Chunk](msg)
+		if err != nil {
+			panic(err)
+		}
+		n.receiver.HandleChunk(chunk)
+	case TRANSFER_CANCELLED:
+		id, err := Deserialize[string](msg)
+		if err != nil {
+			panic(err)
+		}
+		n.receiver.HandleCancel(id)
 	}
-	defer conn.Close()
-	return conn.LocalAddr().(*net.UDPAddr).Port
-}
-
-var DEBUG_MODE bool = true
-var cached_device_name string = ""
-
-func getDeviceName() string {
-	if len(cached_device_name) > 0 {
-		return cached_device_name
-	}
-
-	if DEBUG_MODE {
-		id := rand.Intn(1000000)
-		cached_device_name = fmt.Sprintf("peer-%d", id)
-		return cached_device_name
-	}
-
-	name, err := os.Hostname()
-	if err != nil {
-		panic(err) // getting the hostname is a must
-	}
-	cached_device_name = name
-	return name
 }

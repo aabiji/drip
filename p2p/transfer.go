@@ -14,9 +14,9 @@ import (
 
 const ( // message types
 	TRANSFER_CHUNK = iota
-	TRANSFER_REQUEST
 	TRANSFER_CANCELLED
 	TRANSFER_INFO
+	TRANSFER_REQUEST
 	TRANSFER_RESPONSE
 )
 
@@ -26,11 +26,14 @@ type Transfer struct {
 	Recipients []string
 	Files      map[string]*File
 
-	Cancelled    bool
-	CancelReason string
-
 	pending              bool
 	authorizedRecipients []string
+}
+
+type TransferRequest struct {
+	Sender     string
+	TransferId string
+	Message    string
 }
 
 type TransferResponse struct {
@@ -129,10 +132,7 @@ func (t Transfer) Cancel(reason string) Message {
 	for _, file := range t.Files {
 		file.cancel()
 	}
-	t.Cancelled = true
-	t.CancelReason = reason
-
-	msg := NewMessage(TRANSFER_CANCELLED, t.Id)
+	msg := NewMessage(TRANSFER_CANCELLED, deviceName())
 	msg.Recipients = t.Recipients
 	return msg
 }
@@ -175,7 +175,11 @@ func (s *Sender) StartTransfer(
 		Files:      files,
 		pending:    true,
 	}
-	msg := NewMessage(TRANSFER_REQUEST, id)
+	request := TransferRequest{
+		Sender:     deviceName(),
+		TransferId: id,
+		Message:    fmt.Sprintf("Accept files from %s", deviceName())}
+	msg := NewMessage(TRANSFER_REQUEST, request)
 	msg.Recipients = recipients
 	sendMsg(msg)
 }
@@ -195,12 +199,14 @@ type Receiver struct {
 	transfers      map[string]Transfer
 	mutex          sync.Mutex
 	downloadFolder *string
+	appEvents      chan Message
 }
 
-func NewReceiver(downloadFolder *string) Receiver {
+func NewReceiver(downloadFolder *string, appEvents chan Message) Receiver {
 	return Receiver{
 		transfers:      make(map[string]Transfer),
 		downloadFolder: downloadFolder,
+		appEvents:      appEvents,
 	}
 }
 
@@ -233,10 +239,6 @@ func (r *Receiver) HandleCancel(transferId string) {
 	delete(r.transfers, transferId)
 }
 
-func (r *Receiver) HandleRequest(transferId string) {
-	// TODO: ask user for auth
-}
-
 func (r *Receiver) HandleInfo(transfer Transfer) {
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
@@ -250,7 +252,8 @@ func (r *Receiver) HandleInfo(transfer Transfer) {
 
 func (r *Receiver) handleTransferCompletion(id string) {
 	allDone := true
-	for _, file := range r.transfers[id].Files {
+	t := r.transfers[id]
+	for _, file := range t.Files {
 		if !file.doneReceiving {
 			allDone = false
 			break
@@ -259,7 +262,8 @@ func (r *Receiver) handleTransferCompletion(id string) {
 
 	if allDone {
 		delete(r.transfers, id)
-		// TODO: notify the user
+		str := fmt.Sprintf("Received %d from %s", len(t.Files), t.Sender)
+		r.appEvents <- NewMessage(NOTIFY_COMPLETION, str)
 	}
 }
 

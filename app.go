@@ -17,6 +17,9 @@ type App struct {
 	ui       *UI
 	settings Settings
 
+	appEvents  chan p2p.Message
+	nodeEvents chan p2p.Message
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -24,13 +27,30 @@ type App struct {
 func NewApp() App {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := App{
-		settings: loadSettings(),
-		ctx:      ctx,
-		cancel:   cancel,
+		settings:   loadSettings(),
+		appEvents:  make(chan p2p.Message),
+		nodeEvents: make(chan p2p.Message),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	a.ui = NewUI(&a.settings, a.sendFiles)
-	a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath)
+	a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath,
+		a.appEvents, a.nodeEvents)
+	go a.handleAppEvents()
 	return a
+}
+
+func (a *App) Launch() {
+	go func() { a.openWindow() }()
+	app.Main()
+}
+
+func (a *App) Shutdown() {
+	saveSettings(a.settings)
+	close(a.appEvents)
+	close(a.nodeEvents)
+	a.cancel()
+	a.node.Shutdown()
 }
 
 func (a *App) openWindow() {
@@ -50,21 +70,12 @@ func (a *App) openWindow() {
 	}
 }
 
-func (a *App) Launch() {
-	go func() { a.openWindow() }()
-	app.Main()
-}
-
-func (a *App) Shutdown() {
-	saveSettings(a.settings)
-	a.cancel()
-	a.node.Shutdown()
-}
-
 func (a App) sendFiles() {
 	recipients := []string{}
 	for _, peer := range a.ui.recipients {
-		recipients = append(recipients, peer.name)
+		if peer.check.Value {
+			recipients = append(recipients, peer.name)
+		}
 	}
 
 	files := map[string]*p2p.File{}
@@ -76,13 +87,38 @@ func (a App) sendFiles() {
 	a.node.SendFiles(recipients, files)
 }
 
-func (a App) askForAuth(peerId string) bool {
-	fmt.Println("Asking the user to authorize a transfer from peerId...")
-	return true
-}
+func (a App) handleAppEvents() {
+	for event := range a.appEvents {
+		switch event.Type {
+		case p2p.ADDED_PEER, p2p.REMOVED_PEER:
+			peer, err := p2p.Deserialize[string](event)
+			if err != nil {
+				panic(err)
+			}
+			a.ui.UpdateRecipients(peer, event.Type == p2p.REMOVED_PEER)
 
-func (a App) notifyTransfer(peerId string, numFiles int) {
-	notifier, _ := notify.NewNotifier()
-	msg := fmt.Sprintf("Got %d files from %s\n", numFiles, peerId)
-	_, _ = notifier.CreateNotification("Transfer status", msg)
+		case p2p.NOTIFY_COMPLETION:
+			msg, err := p2p.Deserialize[string](event)
+			if err != nil {
+				panic(err)
+			}
+			notifier, _ := notify.NewNotifier()
+			_, _ = notifier.CreateNotification("Transfer status", msg)
+
+		case p2p.TRANSFER_REQUEST:
+			request, err := p2p.Deserialize[p2p.TransferRequest](event)
+			if err != nil {
+				panic(err)
+			}
+			fmt.Println(request.Message)
+
+			response := p2p.TransferResponse{
+				TransferId: request.TransferId,
+				Authorized: true,
+			}
+			msg := p2p.NewMessage(p2p.TRANSFER_RESPONSE, response)
+			msg.Recipients = []string{request.Sender}
+			a.nodeEvents <- msg
+		}
+	}
 }

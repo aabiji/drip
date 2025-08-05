@@ -111,6 +111,19 @@ func NewUI(s *Settings, sendCallback func()) *UI {
 	return ui
 }
 
+func (ui *UI) UpdateRecipients(recipient string, remove bool) {
+	if !remove {
+		ui.recipients = append(ui.recipients, Item{name: recipient})
+	} else {
+		for i := 0; i < len(ui.recipients); i++ {
+			if ui.recipients[i].name == recipient {
+				ui.recipients = append(ui.recipients[:i], ui.recipients[i+1:]...)
+				break
+			}
+		}
+	}
+}
+
 func (ui *UI) AddError(err error) {
 	ui.errors = append(ui.errors, Item{name: err.Error()})
 }

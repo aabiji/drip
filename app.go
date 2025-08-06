@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"time"
 
 	"gioui.org/app"
 	"gioui.org/op"
@@ -12,10 +13,9 @@ import (
 )
 
 type App struct {
-	node     *p2p.Node
-	ui       *UI
-	settings Settings
-
+	node       *p2p.Node
+	ui         *UI
+	settings   Settings
 	appEvents  chan p2p.Message
 	nodeEvents chan p2p.Message
 
@@ -23,6 +23,7 @@ type App struct {
 	// for example, if multiple peers attempt to send us files in successoin
 	currentResponse p2p.TransferResponse
 	requestSender   string
+	currentTransfer string
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -88,8 +89,15 @@ func (a *App) sendFiles() {
 		files[file.name] = f
 	}
 
-	a.node.SendFiles(recipients, files)
+	a.currentTransfer = a.node.SendFiles(recipients, files)
 	a.ui.currentPage = PROGRESS_PAGE
+	go func() {
+		for a.ui.currentPage == PROGRESS_PAGE {
+			percentages := a.node.GetFilePercentages(a.currentTransfer)
+			a.ui.UpdateFileProgresses(percentages)
+			time.Sleep(time.Second)
+		}
+	}()
 }
 
 func (a *App) handleAppEvents() {

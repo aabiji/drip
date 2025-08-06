@@ -96,7 +96,7 @@ func (f *File) SendChunks(sendMsg func(Message), t *Transfer) {
 	defer f.reader.Close()
 
 	for {
-		buffer := make([]byte, 256*1024)
+		buffer := make([]byte, 256*1024) // TODO: just how high can we go?
 		n, err := f.reader.Read(buffer)
 
 		if err == io.EOF {
@@ -168,7 +168,7 @@ func NewSender() Sender {
 }
 
 func (s *Sender) StartTransfer(
-	recipients []string, files map[string]*File, sendMsg func(Message)) {
+	recipients []string, files map[string]*File, sendMsg func(Message)) string {
 	id := uuid.NewString()
 	s.transfers[id] = Transfer{
 		Sender:     deviceName(),
@@ -184,16 +184,25 @@ func (s *Sender) StartTransfer(
 	msg := NewMessage(TRANSFER_REQUEST, request)
 	msg.Recipients = recipients
 	sendMsg(msg)
+	return id
 }
 
 func (s *Sender) CancelTransfer(id string, sendMsg func(Message)) {
 	sendMsg(s.transfers[id].Cancel())
 }
 
-func (n *Sender) HandleTransferResponse(
+func (s *Sender) HandleTransferResponse(
 	recipient string, response TransferResponse, sendMsg func(Message)) {
-	t := n.transfers[response.TransferId]
+	t := s.transfers[response.TransferId]
 	t.handleRecipientResponse(response.Authorized, recipient, sendMsg)
+}
+
+func (s *Sender) GetFilePercentages(transferId string) map[string]float32 {
+	percentages := map[string]float32{}
+	for _, f := range s.transfers[transferId].Files {
+		percentages[f.Name] = float32(float64(f.amountSent) / float64(f.Size))
+	}
+	return percentages
 }
 
 type Receiver struct {

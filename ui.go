@@ -59,7 +59,7 @@ type Item struct {
 	// file info
 	rc       io.ReadCloser
 	size     int64
-	progress *float32
+	progress float32
 }
 
 type UI struct {
@@ -129,6 +129,13 @@ func (ui *UI) UpdateRecipients(recipient string, remove bool) {
 	}
 }
 
+func (ui *UI) UpdateFileProgresses(percentages map[string]float32) {
+	for i := 0; i < len(ui.files); i++ {
+		name := ui.files[i].name
+		ui.files[i].progress = percentages[name]
+	}
+}
+
 func (ui *UI) AddError(err error) {
 	ui.errors = append(ui.errors, Item{name: err.Error()})
 }
@@ -164,7 +171,8 @@ func (ui *UI) addFiles() {
 		n := fmt.Sprintf(
 			"%s-%d.%s", filepath.Base(info.Name()),
 			rand.IntN(100), filepath.Ext(info.Name()))
-		ui.files = append(ui.files, Item{name: n, size: info.Size(), rc: readCloser})
+		ui.files = append(ui.files, Item{
+			name: n, size: info.Size(), rc: readCloser, progress: -1})
 	}
 }
 
@@ -391,7 +399,7 @@ func (ui *UI) drawErrorContainer(gtx C) D {
 
 func (ui *UI) drawFileEntry(gtx C, file *Item) D {
 	padding := layout.Inset{Top: unit.Dp(16), Right: unit.Dp(16)}
-	if file.progress == nil {
+	if file.progress <= 0 {
 		// since there wouldn't be a progress bar at the bottom
 		padding.Bottom = unit.Dp(16)
 	}
@@ -420,7 +428,7 @@ func (ui *UI) drawFileEntry(gtx C, file *Item) D {
 							})
 					}),
 					layout.Rigid(func(gtx C) D {
-						if file.progress == nil {
+						if file.progress < 0 {
 							return IconButton(gtx, ui.styles, 20, false,
 								&file.clickable, ui.icons[CLOSE_ICON])
 						}
@@ -430,10 +438,10 @@ func (ui *UI) drawFileEntry(gtx C, file *Item) D {
 				)
 			}),
 			layout.Rigid(func(gtx C) D {
-				if file.progress != nil {
+				if file.progress > 0 {
 					return layout.Inset{
 						Top: unit.Dp(8)}.Layout(gtx, func(gtx C) D {
-						return ProgressBar(gtx, ui.styles, *file.progress)
+						return ProgressBar(gtx, ui.styles, file.progress)
 					})
 				}
 				// empty space so layout doesn't collapse

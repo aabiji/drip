@@ -55,8 +55,12 @@ func NewNode(
 	return n
 }
 
-func (n *Node) SendFiles(recipients []string, files map[string]*File) {
-	n.sender.StartTransfer(recipients, files, n.sendMsg)
+func (n *Node) SendFiles(recipients []string, files map[string]*File) string {
+	return n.sender.StartTransfer(recipients, files, n.sendMsg)
+}
+
+func (n *Node) GetFilePercentages(transferId string) map[string]float32 {
+	return n.sender.GetFilePercentages(transferId)
 }
 
 func (n *Node) Shutdown() {

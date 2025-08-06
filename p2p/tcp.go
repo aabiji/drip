@@ -16,6 +16,7 @@ const ( // message types
 	ICE_TCP_PACKET
 )
 
+// FIXME: why doesn't this get closed???
 type TcpServer struct {
 	packets  chan Message
 	closed   bool
@@ -24,10 +25,7 @@ type TcpServer struct {
 	ctx      context.Context
 }
 
-func NewTcpServer(
-	ourAddr string, peerAddr string,
-	ctx context.Context,
-) TcpServer {
+func NewTcpServer(ourAddr string, peerAddr string, ctx context.Context) TcpServer {
 	return TcpServer{
 		packets:  make(chan Message, 25),
 		closed:   false,

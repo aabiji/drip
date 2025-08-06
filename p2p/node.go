@@ -5,13 +5,15 @@ import (
 )
 
 // event types
-// TRANSFER_REQUEST and TRANSFER_RESPONSe are also used
+// TRANSFER_REQUEST and TRANSFER_RESPONSE are also used
 const (
-	ADDED_PEER = iota
+	ADDED_PEER = iota + 100
 	REMOVED_PEER
-	FINDER_REMOVED_PEER
-	PEER_CONNECTION_CLOSED
 	NOTIFY_COMPLETION
+
+	// used by the app
+	SEND_FILES
+	AUTH_GRANTED
 )
 
 type Node struct {
@@ -80,21 +82,6 @@ func (n *Node) addPeer(info PeerInfo) {
 	n.appEvents <- NewMessage(ADDED_PEER, info.Id)
 }
 
-func (n *Node) removePeer(peerId string, alreadyClosed bool) {
-	_, exists := n.peers[peerId]
-	if !exists {
-		return
-	}
-
-	if !alreadyClosed {
-		n.peers[peerId].Close()
-		n.receiver.Cancel(peerId)
-	}
-
-	delete(n.peers, peerId)
-	n.appEvents <- NewMessage(REMOVED_PEER, peerId)
-}
-
 func (n *Node) handleNodeEvents() {
 	for event := range n.nodeEvents {
 		switch event.Type {
@@ -108,12 +95,15 @@ func (n *Node) handleNodeEvents() {
 			}
 			n.addPeer(info)
 
-		case FINDER_REMOVED_PEER, PEER_CONNECTION_CLOSED:
+		case REMOVED_PEER:
 			peerId, err := Deserialize[string](event)
 			if err != nil {
 				panic(err)
 			}
-			n.removePeer(peerId, event.Type == PEER_CONNECTION_CLOSED)
+			// remove peer
+			n.receiver.Cancel(peerId)
+			delete(n.peers, peerId)
+			n.appEvents <- NewMessage(REMOVED_PEER, peerId)
 		}
 	}
 }
@@ -123,6 +113,7 @@ func (n *Node) handlePeerMessage(msg Message) {
 	case TRANSFER_REQUEST:
 		n.appEvents <- msg // forward this to the frontend
 	case TRANSFER_RESPONSE:
+		// TODO: handle the case where we're not authorized
 		response, err := Deserialize[TransferResponse](msg)
 		if err != nil {
 			panic(err)

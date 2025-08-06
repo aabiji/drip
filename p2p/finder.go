@@ -101,11 +101,13 @@ func (f *PeerFinder) listenForBroadcasts() error {
 			return err
 		}
 
-		// Remove peers we haven't heard from in a while
+		// Remove peers we haven't heard from in a while. We don't close
+		// the peer connection here, because it would have already been
+		// closed since the webrtc connection would be disrupted.
 		f.mu.Lock()
+		limit := f.queryFrequency * 3
 		for key, peer := range f.peers {
-			if time.Since(peer.LastHeardFrom) >= f.queryFrequency {
-				f.nodeEvents <- NewMessage(REMOVED_PEER, key)
+			if time.Since(peer.LastHeardFrom) >= limit {
 				delete(f.peers, key)
 			}
 		}

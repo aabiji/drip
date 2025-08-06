@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"log"
 
 	"gioui.org/app"
 	"gioui.org/op"
@@ -20,6 +19,11 @@ type App struct {
 	appEvents  chan p2p.Message
 	nodeEvents chan p2p.Message
 
+	// TODO: we should queue this
+	// for example, if multiple peers attempt to send us files in successoin
+	currentResponse p2p.TransferResponse
+	requestSender   string
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
@@ -33,7 +37,7 @@ func NewApp() App {
 		ctx:        ctx,
 		cancel:     cancel,
 	}
-	a.ui = NewUI(&a.settings, a.sendFiles)
+	a.ui = NewUI(&a.settings, a.appEvents)
 	a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath,
 		a.appEvents, a.nodeEvents)
 	go a.handleAppEvents()
@@ -85,11 +89,15 @@ func (a *App) sendFiles() {
 	}
 
 	a.node.SendFiles(recipients, files)
+	a.ui.currentPage = PROGRESS_PAGE
 }
 
 func (a *App) handleAppEvents() {
 	for event := range a.appEvents {
 		switch event.Type {
+		case p2p.SEND_FILES:
+			a.sendFiles()
+
 		case p2p.ADDED_PEER, p2p.REMOVED_PEER:
 			peer, err := p2p.Deserialize[string](event)
 			if err != nil {
@@ -106,18 +114,27 @@ func (a *App) handleAppEvents() {
 			_, _ = notifier.CreateNotification("Transfer status", msg)
 
 		case p2p.TRANSFER_REQUEST:
+			// show the request to the user
 			request, err := p2p.Deserialize[p2p.TransferRequest](event)
 			if err != nil {
 				panic(err)
 			}
-			log.Println(request.Message)
+			a.currentResponse = p2p.TransferResponse{TransferId: request.TransferId}
+			a.requestSender = request.Sender
+			a.ui.showAuthPopup = true
+			a.ui.authMsg = request.Message
 
-			response := p2p.TransferResponse{
-				TransferId: request.TransferId,
-				Authorized: true,
+		case p2p.AUTH_GRANTED:
+			// relay back the user's choice
+			authorized, err := p2p.Deserialize[bool](event)
+			if err != nil {
+				panic(err)
 			}
-			msg := p2p.NewMessage(p2p.TRANSFER_RESPONSE, response)
-			msg.Recipients = []string{request.Sender}
+
+			a.ui.showAuthPopup = false
+			a.currentResponse.Authorized = authorized
+			msg := p2p.NewMessage(p2p.TRANSFER_RESPONSE, a.currentResponse)
+			msg.Recipients = []string{a.requestSender}
 			a.nodeEvents <- msg
 		}
 	}

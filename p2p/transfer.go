@@ -2,6 +2,7 @@ package p2p
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -68,16 +69,16 @@ func NewReaderFile(name string, size int64, rc io.ReadCloser) *File {
 }
 
 func NewWriterFile(path string, size int64) *File {
-	exists := true
+	_, err := os.Stat(path)
+	newFile := errors.Is(err, os.ErrNotExist)
+
 	file, err := os.OpenFile(path, os.O_CREATE|os.O_RDWR, 0644)
-	if os.IsNotExist(err) {
-		exists = false
-	} else if err != nil {
+	if err != nil {
 		panic(err)
 	}
 	defer file.Close()
 
-	if !exists {
+	if newFile {
 		err = fallocate(file, 0, size)
 		if err != nil {
 			panic(err)
@@ -147,7 +148,9 @@ func (t *Transfer) handleRecipientResponse(
 	t.authorizedRecipients = append(t.authorizedRecipients, recipient)
 	if len(t.authorizedRecipients) == len(t.Recipients) {
 		// got authorization from all the recipients, start sending files...
-		sendMsg(NewMessage(TRANSFER_INFO, *t))
+		msg := NewMessage(TRANSFER_INFO, *t)
+		msg.Recipients = t.Recipients
+		sendMsg(msg)
 
 		t.pending = false
 		for _, file := range t.Files {

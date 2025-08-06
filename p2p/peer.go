@@ -13,6 +13,7 @@ type PeerConnection struct {
 	makingOffer bool
 	polite      bool
 	id          string
+	closed      bool
 
 	connection  *webrtc.PeerConnection
 	dataChannel *webrtc.DataChannel
@@ -47,6 +48,7 @@ func NewPeer(
 
 	return &PeerConnection{
 		makingOffer:    false,
+		closed:         false,
 		polite:         polite,
 		id:             id,
 		server:         NewTcpServer(ourAddr, peerAddr, ctx),
@@ -60,19 +62,16 @@ func NewPeer(
 
 // Will also call the dataChannel's OnClose
 func (p *PeerConnection) Close() {
-	fmt.Println("closing...")
+	if p.closed {
+		return
+	}
 
 	p.cancel()
 	close(p.PendingSending)
-	if p.connection != nil {
-		p.connection.Close()
-		p.connection = nil
-	}
-	if p.dataChannel != nil {
-		p.dataChannel.GracefulClose()
-		p.dataChannel = nil
-	}
-	p.nodeEvents <- NewMessage(PEER_CONNECTION_CLOSED, p.id)
+	p.connection.Close()
+	p.dataChannel.GracefulClose()
+	p.nodeEvents <- NewMessage(REMOVED_PEER, p.id)
+	p.closed = true
 }
 
 func (p *PeerConnection) Connected() bool { return p.dataChannel != nil }
@@ -88,15 +87,10 @@ func (p *PeerConnection) CreateConnection() {
 	}
 
 	p.connection.OnConnectionStateChange(func(state webrtc.PeerConnectionState) {
-		switch state {
-		case webrtc.PeerConnectionStateConnected:
-		case webrtc.PeerConnectionStateDisconnected,
-			webrtc.PeerConnectionStateFailed,
-			webrtc.PeerConnectionStateClosed:
-			fmt.Println("closing from webrtc...")
+		if state == webrtc.PeerConnectionStateDisconnected ||
+			state == webrtc.PeerConnectionStateFailed ||
+			state == webrtc.PeerConnectionStateClosed {
 			p.Close()
-		default:
-			// do nothing
 		}
 	})
 

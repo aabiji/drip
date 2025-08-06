@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"time"
@@ -14,6 +15,7 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 	"gioui.org/x/explorer"
+	"github.com/aabiji/drip/p2p"
 	"golang.org/x/exp/shiny/materialdesign/icons"
 )
 
@@ -22,7 +24,6 @@ const (
 	SETTINGS_PAGE
 	PROGRESS_PAGE
 	PICKER_PAGE
-	AUTH_PAGE
 )
 
 const (
@@ -42,8 +43,8 @@ const (
 	PAGE_BTN
 	BACK_BTN
 	SELECT_BTN
-	ACCEPT
-	DENY
+	ACCEPT_BTN
+	DENY_BTN
 	BTNS_END
 )
 
@@ -62,10 +63,10 @@ type Item struct {
 }
 
 type UI struct {
-	settings     *Settings
-	picker       *explorer.Explorer
-	sendCallback func()
-	styles       Styles
+	settings  *Settings
+	appEvents chan p2p.Message
+	picker    *explorer.Explorer
+	styles    Styles
 
 	recipientsList *widget.List
 	recipients     []Item
@@ -78,20 +79,23 @@ type UI struct {
 	icons       []*widget.Icon
 	buttons     []widget.Clickable
 	currentPage int
+
+	authMsg       string
+	showAuthPopup bool
 }
 
-func NewUI(s *Settings, sendCallback func()) *UI {
+func NewUI(s *Settings, appEvents chan p2p.Message) *UI {
 	ui := &UI{
+		appEvents: appEvents,
 		recipientsList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
 		filesList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
 		foldersList: &widget.List{
 			List: layout.List{Axis: layout.Vertical}},
-		buttons:      make([]widget.Clickable, BTNS_END-BTNS_START),
-		sendCallback: sendCallback,
-		currentPage:  HOME_PAGE,
-		settings:     s,
+		buttons:     make([]widget.Clickable, BTNS_END-BTNS_START),
+		currentPage: HOME_PAGE,
+		settings:    s,
 	}
 
 	ui.setupFolderList()
@@ -112,6 +116,7 @@ func NewUI(s *Settings, sendCallback func()) *UI {
 }
 
 func (ui *UI) UpdateRecipients(recipient string, remove bool) {
+	// TODO: get the UI to immediately update
 	if !remove {
 		ui.recipients = append(ui.recipients, Item{name: recipient})
 	} else {
@@ -156,8 +161,10 @@ func (ui *UI) addFiles() {
 			panic(err)
 		}
 
-		ui.files = append(ui.files, Item{name: info.Name(), size: info.Size()})
-		readCloser.Close()
+		n := fmt.Sprintf(
+			"%s-%d.%s", filepath.Base(info.Name()),
+			rand.IntN(100), filepath.Ext(info.Name()))
+		ui.files = append(ui.files, Item{name: n, size: info.Size(), rc: readCloser})
 	}
 }
 
@@ -229,7 +236,12 @@ func (ui *UI) handleInputs(gtx C) {
 	}
 
 	if !ui.sendBtnDisabled() && ui.buttons[SEND_BTN].Clicked(gtx) {
-		ui.sendCallback()
+		ui.appEvents <- p2p.NewMessage(p2p.SEND_FILES, "")
+	}
+
+	acceptClicked := ui.buttons[ACCEPT_BTN].Clicked(gtx)
+	if acceptClicked || ui.buttons[DENY_BTN].Clicked(gtx) {
+		ui.appEvents <- p2p.NewMessage(p2p.AUTH_GRANTED, acceptClicked)
 	}
 
 	if ui.buttons[BACK_BTN].Clicked(gtx) {
@@ -318,10 +330,11 @@ func (ui *UI) DrawFrame(gtx C) {
 		}),
 
 		layout.Stacked(func(gtx C) D { // auth transfer modal
-			if ui.currentPage != AUTH_PAGE {
+			if ui.showAuthPopup {
+				return ui.drawPermissionPage(gtx)
+			} else {
 				return layout.Dimensions{}
 			}
-			return ui.drawPermissionPage(gtx)
 		}),
 	)
 }
@@ -470,8 +483,8 @@ func (ui *UI) drawHomePage(gtx C) D {
 				return Spinner(gtx, ui.styles, "Looking for recipients...")
 			}
 
-			return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx, len(ui.recipients),
-				func(gtx C, i int) D {
+			return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx,
+				len(ui.recipients), func(gtx C, i int) D {
 					return Checkbox(gtx, ui.styles, &ui.recipients[i].check,
 						ui.icons[CHECK_ICON], ui.recipients[i].name)
 				})
@@ -631,8 +644,7 @@ func (ui *UI) drawPermissionPage(gtx C) D {
 			}.Layout(gtx,
 				layout.Rigid(func(gtx C) D {
 					return XCentered(gtx, false, func(gtx C) D {
-						msg := "Accept 10 files from Peer X?"
-						return Text(gtx, ui.styles, msg, 30, false)
+						return Text(gtx, ui.styles, ui.authMsg, 30, false)
 					})
 				}),
 
@@ -642,7 +654,7 @@ func (ui *UI) drawPermissionPage(gtx C) D {
 
 				layout.Rigid(func(gtx C) D {
 					return TextButton(gtx, ui.styles, "Yes", 18,
-						false, false, true, &ui.buttons[ACCEPT])
+						false, false, true, &ui.buttons[ACCEPT_BTN])
 				}),
 
 				layout.Rigid(func(gtx C) D {
@@ -651,7 +663,7 @@ func (ui *UI) drawPermissionPage(gtx C) D {
 
 				layout.Rigid(func(gtx C) D {
 					return TextButton(gtx, ui.styles, "No", 18,
-						true, false, true, &ui.buttons[DENY])
+						true, false, true, &ui.buttons[DENY_BTN])
 				}),
 			)
 		})

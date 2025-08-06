@@ -2,7 +2,7 @@ package main
 
 import (
 	"context"
-	"fmt"
+	"log"
 
 	"gioui.org/app"
 	"gioui.org/op"
@@ -70,7 +70,7 @@ func (a *App) openWindow() {
 	}
 }
 
-func (a App) sendFiles() {
+func (a *App) sendFiles() {
 	recipients := []string{}
 	for _, peer := range a.ui.recipients {
 		if peer.check.Value {
@@ -87,7 +87,7 @@ func (a App) sendFiles() {
 	a.node.SendFiles(recipients, files)
 }
 
-func (a App) handleAppEvents() {
+func (a *App) handleAppEvents() {
 	for event := range a.appEvents {
 		switch event.Type {
 		case p2p.ADDED_PEER, p2p.REMOVED_PEER:
@@ -110,7 +110,7 @@ func (a App) handleAppEvents() {
 			if err != nil {
 				panic(err)
 			}
-			fmt.Println(request.Message)
+			log.Println(request.Message)
 
 			response := p2p.TransferResponse{
 				TransferId: request.TransferId,

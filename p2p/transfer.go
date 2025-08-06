@@ -128,7 +128,7 @@ func (f *File) CloseWriter() {
 	f.writer.Unmap()
 }
 
-func (t Transfer) Cancel(reason string) Message {
+func (t Transfer) Cancel() Message {
 	for _, file := range t.Files {
 		file.cancel()
 	}
@@ -140,8 +140,7 @@ func (t Transfer) Cancel(reason string) Message {
 func (t *Transfer) handleRecipientResponse(
 	authorized bool, recipient string, sendMsg func(Message)) {
 	if !authorized {
-		reason := fmt.Sprintf("%s has refused the transfer", recipient)
-		sendMsg(t.Cancel(reason))
+		sendMsg(t.Cancel())
 		return
 	}
 
@@ -178,15 +177,14 @@ func (s *Sender) StartTransfer(
 	request := TransferRequest{
 		Sender:     deviceName(),
 		TransferId: id,
-		Message:    fmt.Sprintf("Accept files from %s", deviceName())}
+		Message:    fmt.Sprintf("Accept files from %s?", deviceName())}
 	msg := NewMessage(TRANSFER_REQUEST, request)
 	msg.Recipients = recipients
 	sendMsg(msg)
 }
 
 func (s *Sender) CancelTransfer(id string, sendMsg func(Message)) {
-	reason := fmt.Sprintf("%s cancelled the transfer", deviceName())
-	sendMsg(s.transfers[id].Cancel(reason))
+	sendMsg(s.transfers[id].Cancel())
 }
 
 func (n *Sender) HandleTransferResponse(

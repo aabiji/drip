@@ -463,28 +463,19 @@ func (ui *UI) drawUploadButton(gtx C) D {
 	})
 }
 
-func (ui *UI) drawPeersList() layout.FlexChild {
-	widget := func(gtx C) D {
-		if len(ui.recipients) == 0 {
-			return Spinner(gtx, ui.styles, "Looking for recipients...")
-		}
-
-		return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx, len(ui.recipients),
-			func(gtx C, i int) D {
-				return Checkbox(gtx, ui.styles, &ui.recipients[i].check,
-					ui.icons[CHECK_ICON], ui.recipients[i].name)
-			})
-	}
-
-	if len(ui.recipients) > 0 {
-		return layout.Flexed(0.5, widget)
-	}
-	return layout.Rigid(widget)
-}
-
 func (ui *UI) drawHomePage(gtx C) D {
 	widgets := []layout.FlexChild{
-		ui.drawPeersList(),
+		layout.Rigid(func(gtx C) D {
+			if len(ui.recipients) == 0 {
+				return Spinner(gtx, ui.styles, "Looking for recipients...")
+			}
+
+			return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx, len(ui.recipients),
+				func(gtx C, i int) D {
+					return Checkbox(gtx, ui.styles, &ui.recipients[i].check,
+						ui.icons[CHECK_ICON], ui.recipients[i].name)
+				})
+		}),
 		layout.Rigid(func(gtx C) D { return ui.drawUploadButton(gtx) }),
 	}
 

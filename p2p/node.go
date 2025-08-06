@@ -1,11 +1,16 @@
 package p2p
 
-import "context"
+import (
+	"context"
+)
 
-// NOTE: TRANSFER_REQUEST and TRANSFER_RESPONSE are also used
-const ( // app events
+// event types
+// TRANSFER_REQUEST and TRANSFER_RESPONSe are also used
+const (
 	ADDED_PEER = iota
 	REMOVED_PEER
+	FINDER_REMOVED_PEER
+	PEER_CONNECTION_CLOSED
 	NOTIFY_COMPLETION
 )
 
@@ -36,17 +41,15 @@ func NewNode(
 		ctx:        ctx,
 	}
 
+	go n.handleNodeEvents()
+
 	// find peers
-	n.finder = NewPeerFinder(n.port, ctx, n.addPeer, n.removePeer)
+	n.finder = NewPeerFinder(n.port, ctx, n.nodeEvents)
 	go func() {
 		if err := n.finder.Run(); err != nil {
 			panic(err)
 		}
 	}()
-
-	// handle node events, for now the only
-	// node event is TRANSFER_RESPONSE
-	go func() { n.sendMsg(<-nodeEvents) }()
 	return n
 }
 
@@ -69,19 +72,50 @@ func (n *Node) sendMsg(msg Message) {
 
 func (n *Node) addPeer(info PeerInfo) {
 	peer := NewPeer(
-		info.ip, info.id, n.port, info.port,
-		n.ctx, n.handlePeerMessage)
+		info.Ip, info.Id, n.port, info.Port,
+		n.ctx, n.nodeEvents, n.handlePeerMessage)
 	peer.CreateConnection()
 	peer.SetupDataChannels()
-	n.peers[info.id] = peer
-	n.appEvents <- NewMessage(ADDED_PEER, info.id)
+	n.peers[info.Id] = peer
+	n.appEvents <- NewMessage(ADDED_PEER, info.Id)
 }
 
-func (n *Node) removePeer(peerId string) {
-	n.peers[peerId].Close()
+func (n *Node) removePeer(peerId string, alreadyClosed bool) {
+	_, exists := n.peers[peerId]
+	if !exists {
+		return
+	}
+
+	if !alreadyClosed {
+		n.peers[peerId].Close()
+		n.receiver.Cancel(peerId)
+	}
+
 	delete(n.peers, peerId)
-	n.receiver.Cancel(peerId)
 	n.appEvents <- NewMessage(REMOVED_PEER, peerId)
+}
+
+func (n *Node) handleNodeEvents() {
+	for event := range n.nodeEvents {
+		switch event.Type {
+		case TRANSFER_RESPONSE:
+			n.sendMsg(event) // send the response to the sender
+
+		case ADDED_PEER:
+			info, err := Deserialize[PeerInfo](event)
+			if err != nil {
+				panic(err)
+			}
+			n.addPeer(info)
+
+		case FINDER_REMOVED_PEER, PEER_CONNECTION_CLOSED:
+			peerId, err := Deserialize[string](event)
+			if err != nil {
+				panic(err)
+			}
+			n.removePeer(peerId, event.Type == PEER_CONNECTION_CLOSED)
+		}
+	}
 }
 
 func (n *Node) handlePeerMessage(msg Message) {

@@ -12,41 +12,34 @@ import (
 )
 
 type PeerInfo struct {
-	ip            net.IP
-	id            string
-	lastHeardFrom time.Time
-	port          int
+	Ip            net.IP
+	Id            string
+	LastHeardFrom time.Time
+	Port          int
 }
 
 type PeerFinder struct {
-	devicePort         int
-	peerRemovalTimeout time.Duration
-	queryFrequency     time.Duration
-	server             *mdns.Server
-	serviceType        string
+	devicePort     int
+	queryFrequency time.Duration
+	server         *mdns.Server
+	serviceType    string
 
 	peers map[string]PeerInfo
 	mu    sync.Mutex
 
-	ctx               context.Context
-	addPeerHandler    func(PeerInfo)
-	removePeerHandler func(string)
+	nodeEvents chan Message
+	ctx        context.Context
 }
 
 func NewPeerFinder(
-	devicePort int, ctx context.Context,
-	addPeerHandler func(PeerInfo),
-	removePeerHandler func(string),
-) PeerFinder {
+	devicePort int, ctx context.Context, nodeEvents chan Message) PeerFinder {
 	return PeerFinder{
-		serviceType:        "_fileshare._tcp.local.",
-		peerRemovalTimeout: time.Second * 15,
-		queryFrequency:     time.Second * 10,
-		peers:              make(map[string]PeerInfo),
-		devicePort:         devicePort,
-		ctx:                ctx,
-		addPeerHandler:     addPeerHandler,
-		removePeerHandler:  removePeerHandler,
+		serviceType:    "_fileshare._tcp.local.",
+		queryFrequency: time.Second * 10,
+		peers:          make(map[string]PeerInfo),
+		devicePort:     devicePort,
+		ctx:            ctx,
+		nodeEvents:     nodeEvents,
 	}
 }
 
@@ -72,17 +65,17 @@ func (f *PeerFinder) addPeer(entry *mdns.ServiceEntry) {
 
 	f.mu.Lock()
 	if info, exists := f.peers[peerId]; exists {
-		info.lastHeardFrom = time.Now()
+		info.LastHeardFrom = time.Now()
 		f.peers[peerId] = info
 	} else {
 		info := PeerInfo{
-			ip:            entry.AddrV4,
-			id:            peerId,
-			lastHeardFrom: time.Now(),
-			port:          entry.Port,
+			Ip:            entry.AddrV4,
+			Id:            peerId,
+			LastHeardFrom: time.Now(),
+			Port:          entry.Port,
 		}
 		f.peers[peerId] = info
-		f.addPeerHandler(info)
+		f.nodeEvents <- NewMessage(ADDED_PEER, info)
 	}
 	f.mu.Unlock()
 }
@@ -111,8 +104,8 @@ func (f *PeerFinder) listenForBroadcasts() error {
 		// Remove peers we haven't heard from in a while
 		f.mu.Lock()
 		for key, peer := range f.peers {
-			if time.Since(peer.lastHeardFrom) >= f.peerRemovalTimeout {
-				f.removePeerHandler(key)
+			if time.Since(peer.LastHeardFrom) >= f.queryFrequency {
+				f.nodeEvents <- NewMessage(REMOVED_PEER, key)
 				delete(f.peers, key)
 			}
 		}

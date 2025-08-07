@@ -14,7 +14,7 @@ import (
 )
 
 const ( // message types
-	TRANSFER_CHUNK = iota
+	TRANSFER_CHUNK = iota + 100
 	TRANSFER_CANCELLED
 	TRANSFER_INFO
 	TRANSFER_REQUEST
@@ -27,7 +27,6 @@ type Transfer struct {
 	Recipients []string
 	Files      map[string]*File
 
-	pending              bool
 	authorizedRecipients []string
 }
 
@@ -63,6 +62,12 @@ type Chunk struct {
 	Data       []byte
 }
 
+type ProgressReport struct {
+	Percentages map[string]float32
+	Done        bool
+	Started     bool
+}
+
 func NewReaderFile(name string, size int64, rc io.ReadCloser) *File {
 	ctx, cancel := context.WithCancel(context.Background())
 	return &File{Name: name, Size: size, reader: rc, ctx: ctx, cancel: cancel}
@@ -96,7 +101,13 @@ func (f *File) SendChunks(sendMsg func(Message), t *Transfer) {
 	defer f.reader.Close()
 
 	for {
-		buffer := make([]byte, 256*1024) // TODO: just how high can we go?
+		select {
+		case <-f.ctx.Done():
+			return
+		default:
+		}
+
+		buffer := make([]byte, 256*1024)
 		n, err := f.reader.Read(buffer)
 
 		if err == io.EOF {
@@ -109,18 +120,12 @@ func (f *File) SendChunks(sendMsg func(Message), t *Transfer) {
 			TransferId: t.Id,
 			Filename:   f.Name,
 			Offset:     f.amountSent,
-			Data:       buffer}
+			Data:       buffer[:n]}
 		f.amountSent += int64(n)
 
 		msg := NewMessage(TRANSFER_CHUNK, chunk)
 		msg.Recipients = t.Recipients
 		sendMsg(msg)
-
-		select {
-		case <-f.ctx.Done():
-			return
-		default:
-		}
 	}
 }
 
@@ -129,11 +134,11 @@ func (f *File) CloseWriter() {
 	f.writer.Unmap()
 }
 
-func (t Transfer) Cancel() Message {
+func (t *Transfer) Cancel() Message {
 	for _, file := range t.Files {
 		file.cancel()
 	}
-	msg := NewMessage(TRANSFER_CANCELLED, deviceName())
+	msg := NewMessage(TRANSFER_CANCELLED, t.Id)
 	msg.Recipients = t.Recipients
 	return msg
 }
@@ -152,30 +157,28 @@ func (t *Transfer) handleRecipientResponse(
 		msg.Recipients = t.Recipients
 		sendMsg(msg)
 
-		t.pending = false
 		for _, file := range t.Files {
-			file.SendChunks(sendMsg, t)
+			go file.SendChunks(sendMsg, t)
 		}
 	}
 }
 
 type Sender struct {
-	transfers map[string]Transfer
+	transfers map[string]*Transfer
 }
 
 func NewSender() Sender {
-	return Sender{transfers: make(map[string]Transfer)}
+	return Sender{transfers: make(map[string]*Transfer)}
 }
 
 func (s *Sender) StartTransfer(
 	recipients []string, files map[string]*File, sendMsg func(Message)) string {
 	id := uuid.NewString()
-	s.transfers[id] = Transfer{
+	s.transfers[id] = &Transfer{
 		Sender:     deviceName(),
 		Id:         id,
 		Recipients: recipients,
 		Files:      files,
-		pending:    true,
 	}
 	request := TransferRequest{
 		Sender:     deviceName(),
@@ -188,21 +191,47 @@ func (s *Sender) StartTransfer(
 }
 
 func (s *Sender) CancelTransfer(id string, sendMsg func(Message)) {
+	_, exists := s.transfers[id]
+	if !exists {
+		return
+	}
 	sendMsg(s.transfers[id].Cancel())
+	delete(s.transfers, id)
 }
 
 func (s *Sender) HandleTransferResponse(
 	recipient string, response TransferResponse, sendMsg func(Message)) {
+	_, exists := s.transfers[response.TransferId]
+	if !exists {
+		return
+	}
+
 	t := s.transfers[response.TransferId]
 	t.handleRecipientResponse(response.Authorized, recipient, sendMsg)
 }
 
-func (s *Sender) GetFilePercentages(transferId string) map[string]float32 {
-	percentages := map[string]float32{}
-	for _, f := range s.transfers[transferId].Files {
-		percentages[f.Name] = float32(float64(f.amountSent) / float64(f.Size))
+func (s *Sender) GetProgressReport(transferId string) ProgressReport {
+	report := ProgressReport{Percentages: make(map[string]float32)}
+
+	_, exists := s.transfers[transferId]
+	if !exists {
+		return report
 	}
-	return percentages
+
+	report.Done = true
+	report.Started = true
+	for _, f := range s.transfers[transferId].Files {
+		p := float32(float64(f.amountSent) / float64(f.Size))
+		report.Percentages[f.Name] = p
+
+		if p < 0.0001 {
+			report.Started = false
+		}
+		if p < 1.0 {
+			report.Done = false
+		}
+	}
+	return report
 }
 
 type Receiver struct {
@@ -237,6 +266,11 @@ func (r *Receiver) Cancel(disconnectedPeer string) {
 }
 
 func (r *Receiver) HandleCancel(transferId string) {
+	_, exists := r.transfers[transferId]
+	if !exists {
+		return
+	}
+
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 
@@ -278,6 +312,11 @@ func (r *Receiver) handleTransferCompletion(id string) {
 }
 
 func (r *Receiver) HandleChunk(chunk Chunk) {
+	_, exists := r.transfers[chunk.TransferId]
+	if !exists {
+		return
+	}
+
 	r.mutex.Lock()
 	defer r.mutex.Unlock()
 

@@ -154,8 +154,8 @@ func Modal(gtx C, styles Styles, w layout.Widget) D {
 	return bgOverlay(gtx, func(gtx C) D {
 		return layout.Center.Layout(gtx, func(gtx C) D {
 			return Div{
-				width:            75,
-				height:           80,
+				width:            85,
+				height:           90,
 				padding:          layout.UniformInset(unit.Dp(20)),
 				background:       styles.bg500,
 				borderRadius:     styles.rounding,

@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"os"
+	"runtime"
 	"time"
 
 	"gioui.org/app"
 	"gioui.org/op"
+	"gioui.org/unit"
 	"gioui.org/x/explorer"
 	"gioui.org/x/notify"
 
@@ -20,8 +22,6 @@ type App struct {
 	appEvents  chan p2p.Message
 	nodeEvents chan p2p.Message
 
-	// TODO: we should queue this
-	// for example, if multiple peers attempt to send us files in successoin
 	currentResponse p2p.TransferResponse
 	requestSender   string
 	currentTransfer string
@@ -50,6 +50,12 @@ func (a *App) Launch() {
 	go func() {
 		var ops op.Ops
 		window := new(app.Window)
+		window.Option(app.Title("Drip"))
+		window.Option(app.PortraitOrientation.Option())
+		if runtime.GOOS != "android" && runtime.GOOS != "ios" && runtime.GOOS != "js" {
+			window.Option(app.Size(unit.Dp(650), unit.Dp(700)))
+			window.Option(app.MaxSize(unit.Dp(650), unit.Dp(700)))
+		}
 		a.ui.picker = explorer.NewExplorer(window)
 
 		for {
@@ -68,11 +74,11 @@ func (a *App) Launch() {
 }
 
 func (a *App) Shutdown() {
+	a.cancel()
+	a.node.Shutdown()
 	saveSettings(a.settings)
 	close(a.appEvents)
 	close(a.nodeEvents)
-	a.cancel()
-	a.node.Shutdown()
 }
 
 func (a *App) sendFiles() {
@@ -91,13 +97,24 @@ func (a *App) sendFiles() {
 
 	a.currentTransfer = a.node.SendFiles(recipients, files)
 	a.ui.currentPage = PROGRESS_PAGE
-	go func() {
-		for a.ui.currentPage == PROGRESS_PAGE {
-			percentages := a.node.GetFilePercentages(a.currentTransfer)
-			a.ui.UpdateFileProgresses(percentages)
-			time.Sleep(time.Second)
+	a.ui.sendingMsg = "Pending authorization"
+
+	go a.updateFileProgresses()
+}
+
+func (a *App) updateFileProgresses() {
+	for a.ui.currentPage == PROGRESS_PAGE {
+		report := a.node.GetProgressReport(a.currentTransfer)
+		a.ui.UpdateFileProgresses(report.Percentages)
+
+		if report.Done {
+			a.ui.sendingMsg = "Done sending files"
+		} else if report.Started {
+			a.ui.sendingMsg = "Sending files"
 		}
-	}()
+
+		time.Sleep(time.Second)
+	}
 }
 
 func (a *App) handleAppEvents() {
@@ -105,6 +122,14 @@ func (a *App) handleAppEvents() {
 		switch event.Type {
 		case p2p.SEND_FILES:
 			a.sendFiles()
+
+		case p2p.TRANSFER_CANCELLED:
+			a.node.CancelTransfer(a.currentTransfer)
+			a.currentTransfer = ""
+
+		case p2p.TRANSFER_REJECTED:
+			a.ui.ForgetCurrentTransfer(false, false)
+			a.ui.AddError("Transfer was rejected")
 
 		case p2p.ADDED_PEER, p2p.REMOVED_PEER:
 			peer, err := p2p.Deserialize[string](event)

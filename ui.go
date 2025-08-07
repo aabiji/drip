@@ -76,13 +76,15 @@ type UI struct {
 	filesList      *widget.List
 	files          []Item
 
-	errors      []Item
-	icons       []*widget.Icon
-	buttons     []widget.Clickable
-	currentPage int
+	errors  []Item
+	icons   []*widget.Icon
+	buttons []widget.Clickable
 
+	currentPage   int
 	authMsg       string
 	showAuthPopup bool
+	sendingMsg    string
+	sendingDone   bool
 }
 
 func NewUI(s *Settings, appEvents chan p2p.Message) *UI {
@@ -137,8 +139,20 @@ func (ui *UI) UpdateFileProgresses(percentages map[string]float32) {
 	}
 }
 
-func (ui *UI) AddError(err error) {
-	ui.errors = append(ui.errors, Item{name: err.Error()})
+func (ui *UI) AddError(err string) { ui.errors = append(ui.errors, Item{name: err}) }
+
+func (ui *UI) ForgetCurrentTransfer(cancel bool, empty bool) {
+	ui.currentPage = HOME_PAGE
+	if cancel {
+		ui.appEvents <- p2p.NewMessage(p2p.TRANSFER_CANCELLED, "")
+	}
+	if !empty {
+		return
+	}
+	for i := 0; i < len(ui.recipients); i++ {
+		ui.recipients[i].check.Value = false
+	}
+	ui.files = []Item{}
 }
 
 func (ui *UI) sendBtnDisabled() bool {
@@ -215,11 +229,10 @@ func getCopyright() string {
 
 func (ui *UI) handleInputs(gtx C) {
 	if ui.buttons[PAGE_BTN].Clicked(gtx) { // change the current page
-		switch ui.currentPage {
-		case HOME_PAGE:
-			ui.currentPage = SETTINGS_PAGE
-		case SETTINGS_PAGE, PROGRESS_PAGE:
-			ui.currentPage = HOME_PAGE
+		if ui.currentPage == HOME_PAGE || ui.currentPage == SETTINGS_PAGE {
+			ui.currentPage = (ui.currentPage + 1) % 2
+		} else if ui.currentPage == PROGRESS_PAGE {
+			ui.ForgetCurrentTransfer(!ui.sendingDone, true)
 		}
 	}
 
@@ -553,8 +566,7 @@ func (ui *UI) drawProgressPage(gtx C) D {
 			return layout.Inset{Bottom: unit.Dp(20)}.Layout(gtx,
 				func(gtx C) D {
 					return XCentered(gtx, false, func(gtx C) D {
-						return Text(gtx, ui.styles,
-							"Sending files", 40, false)
+						return Text(gtx, ui.styles, ui.sendingMsg, 40, false)
 					})
 				})
 		}),

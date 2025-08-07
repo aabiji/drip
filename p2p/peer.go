@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"sync"
+	"time"
 
 	"github.com/pion/webrtc/v4"
 )
@@ -13,21 +15,20 @@ type PeerConnection struct {
 	makingOffer bool
 	polite      bool
 	id          string
-	closed      bool
 
-	connection  *webrtc.PeerConnection
-	dataChannel *webrtc.DataChannel
-	server      TcpServer
+	server     TcpServer
+	connection *webrtc.PeerConnection
+	msgHandler func(Message) // handle messages received from the data channel
+	nodeEvents chan Message  // communicate with the peer to peer node
 
-	// queue for messages to be sent over the data channel
-	PendingSending chan Message
-	// handles the messages received from the data channel
-	msgHandler func(Message)
-	// to communicate with the peer to peer node
-	nodeEvents chan Message
+	pendingMesages chan Message
+	msgChannel     *webrtc.DataChannel
+	pendingChunks  chan Message
+	chunksChannel  *webrtc.DataChannel
 
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx       context.Context
+	cancel    context.CancelFunc
+	closeOnce sync.Once
 }
 
 func NewPeer(
@@ -48,11 +49,11 @@ func NewPeer(
 
 	return &PeerConnection{
 		makingOffer:    false,
-		closed:         false,
 		polite:         polite,
 		id:             id,
 		server:         NewTcpServer(ourAddr, peerAddr, ctx),
-		PendingSending: make(chan Message, 100),
+		pendingMesages: make(chan Message, 100),
+		pendingChunks:  make(chan Message, 100),
 		ctx:            ctx,
 		cancel:         cancel,
 		msgHandler:     handler,
@@ -62,19 +63,20 @@ func NewPeer(
 
 // Will also call the dataChannel's OnClose
 func (p *PeerConnection) Close() {
-	if p.closed {
-		return
-	}
-
-	p.cancel()
-	close(p.PendingSending)
-	p.connection.Close()
-	p.dataChannel.GracefulClose()
-	p.nodeEvents <- NewMessage(REMOVED_PEER, p.id)
-	p.closed = true
+	p.closeOnce.Do(func() {
+		p.cancel()
+		close(p.pendingChunks)
+		close(p.pendingMesages)
+		p.connection.Close()
+		p.chunksChannel.GracefulClose()
+		p.msgChannel.GracefulClose()
+		p.nodeEvents <- NewMessage(REMOVED_PEER, p.id)
+	})
 }
 
-func (p *PeerConnection) Connected() bool { return p.dataChannel != nil }
+func (p *PeerConnection) Connected() bool {
+	return p.msgChannel != nil && p.chunksChannel != nil
+}
 
 func (p *PeerConnection) CreateConnection() {
 	var err error
@@ -117,12 +119,12 @@ func (p *PeerConnection) CreateConnection() {
 	})
 }
 
-func (p *PeerConnection) SetupDataChannels() {
+func (p *PeerConnection) SetupChannels() {
 	go func() { p.server.ForwardMessages() }()
 	go func() { p.server.ReceiveMessages(p.handlePeerMessage) }()
 
-	receiveHandler := func() {
-		p.dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
+	receiveHandler := func(dataChannel *webrtc.DataChannel) {
+		dataChannel.OnMessage(func(channelMsg webrtc.DataChannelMessage) {
 			msg := GetMessage(channelMsg.Data)
 			if msg.Sender != deviceName() {
 				p.msgHandler(msg)
@@ -130,28 +132,49 @@ func (p *PeerConnection) SetupDataChannels() {
 		})
 	}
 
-	sendHandler := func() {
-		for msg := range p.PendingSending {
-			p.dataChannel.Send(msg.Serialize())
+	sendHandler := func(dataChannel *webrtc.DataChannel, channel chan Message) {
+		bufferSizeLimit := uint64(8 * 1024 * 1024) // 8 megabytes
+		for msg := range channel {
+			// don't keep too much data buffered in order
+			// to reduce congestion and limit memory usage
+			for dataChannel.BufferedAmount() > bufferSizeLimit {
+				time.Sleep(10 * time.Millisecond)
+			}
+			dataChannel.Send(msg.Serialize())
 		}
 	}
 
 	if p.polite {
 		p.connection.OnDataChannel(func(dataChannel *webrtc.DataChannel) {
-			p.dataChannel = dataChannel
-			receiveHandler()
-			go sendHandler()
-			log.Println("Accepting a data channel -- responder")
+			if dataChannel.Label() == "message" {
+				p.msgChannel = dataChannel
+				receiveHandler(p.msgChannel)
+				go sendHandler(p.msgChannel, p.pendingMesages)
+			} else {
+				p.chunksChannel = dataChannel
+				receiveHandler(p.chunksChannel)
+				go sendHandler(p.chunksChannel, p.pendingChunks)
+			}
+			log.Printf("Accepting %s data channel\n", dataChannel.Label())
 		})
 	} else {
 		var err error
-		p.dataChannel, err = p.connection.CreateDataChannel("data", nil)
+
+		p.msgChannel, err = p.connection.CreateDataChannel("message", nil)
 		if err != nil {
 			panic(err)
 		}
-		receiveHandler()
-		go sendHandler()
-		log.Println("Creating a data channel -- initiator")
+		receiveHandler(p.msgChannel)
+		go sendHandler(p.msgChannel, p.pendingMesages)
+
+		p.chunksChannel, err = p.connection.CreateDataChannel("chunk", nil)
+		if err != nil {
+			panic(err)
+		}
+		receiveHandler(p.chunksChannel)
+		go sendHandler(p.chunksChannel, p.pendingChunks)
+
+		log.Println("Created control and message data channels")
 	}
 }
 

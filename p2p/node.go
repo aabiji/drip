@@ -4,23 +4,15 @@ import (
 	"context"
 )
 
-// TODO:
-// - cancelling transfers
-// - knowing when a transfer is complete
-// - shutdown (including tcp) when closing window
-// - port over to android
-// - should have a background process running indefintely...
-
-// event types
-// TRANSFER_REQUEST and TRANSFER_RESPONSE are also used
+// event types used to communicate between the peer to peer node and the frontend
+// TRANSFER_REQUEST, TRANSFER_RESPONSE and TRANSFER_CANCELLED are also used
 const (
-	ADDED_PEER = iota + 100
+	ADDED_PEER = iota + 200
 	REMOVED_PEER
 	NOTIFY_COMPLETION
-
-	// used by the app
 	SEND_FILES
 	AUTH_GRANTED
+	TRANSFER_REJECTED
 )
 
 type Node struct {
@@ -66,8 +58,12 @@ func (n *Node) SendFiles(recipients []string, files map[string]*File) string {
 	return n.sender.StartTransfer(recipients, files, n.sendMsg)
 }
 
-func (n *Node) GetFilePercentages(transferId string) map[string]float32 {
-	return n.sender.GetFilePercentages(transferId)
+func (n *Node) GetProgressReport(transferId string) ProgressReport {
+	return n.sender.GetProgressReport(transferId)
+}
+
+func (n *Node) CancelTransfer(transferId string) {
+	n.sender.CancelTransfer(transferId, n.sendMsg)
 }
 
 func (n *Node) Shutdown() {
@@ -79,7 +75,11 @@ func (n *Node) Shutdown() {
 
 func (n *Node) sendMsg(msg Message) {
 	for _, peer := range msg.Recipients {
-		n.peers[peer].PendingSending <- msg
+		if msg.Type == TRANSFER_CHUNK {
+			n.peers[peer].pendingChunks <- msg
+		} else {
+			n.peers[peer].pendingMesages <- msg
+		}
 	}
 }
 
@@ -88,7 +88,7 @@ func (n *Node) addPeer(info PeerInfo) {
 		info.Ip, info.Id, n.port, info.Port,
 		n.ctx, n.nodeEvents, n.handlePeerMessage)
 	peer.CreateConnection()
-	peer.SetupDataChannels()
+	peer.SetupChannels()
 	n.peers[info.Id] = peer
 	n.appEvents <- NewMessage(ADDED_PEER, info.Id)
 }
@@ -124,10 +124,12 @@ func (n *Node) handlePeerMessage(msg Message) {
 	case TRANSFER_REQUEST:
 		n.appEvents <- msg // forward this to the frontend
 	case TRANSFER_RESPONSE:
-		// TODO: handle the case where we're not authorized
 		response, err := Deserialize[TransferResponse](msg)
 		if err != nil {
 			panic(err)
+		}
+		if !response.Authorized {
+			n.appEvents <- NewMessage(TRANSFER_REJECTED, "")
 		}
 		n.sender.HandleTransferResponse(msg.Sender, response, n.sendMsg)
 	case TRANSFER_INFO:
@@ -136,17 +138,17 @@ func (n *Node) handlePeerMessage(msg Message) {
 			panic(err)
 		}
 		n.receiver.HandleInfo(info)
-	case TRANSFER_CHUNK:
-		chunk, err := Deserialize[Chunk](msg)
-		if err != nil {
-			panic(err)
-		}
-		n.receiver.HandleChunk(chunk)
 	case TRANSFER_CANCELLED:
 		id, err := Deserialize[string](msg)
 		if err != nil {
 			panic(err)
 		}
 		n.receiver.HandleCancel(id)
+	case TRANSFER_CHUNK:
+		chunk, err := Deserialize[Chunk](msg)
+		if err != nil {
+			panic(err)
+		}
+		go n.receiver.HandleChunk(chunk)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gioui.org/layout"
@@ -169,7 +170,7 @@ func (ui *UI) addFiles() {
 		}
 
 		n := fmt.Sprintf(
-			"%s-%d.%s", filepath.Base(info.Name()),
+			"%s-%d%s", strings.Split(info.Name(), ".")[0],
 			rand.IntN(100), filepath.Ext(info.Name()))
 		ui.files = append(ui.files, Item{
 			name: n, size: info.Size(), rc: readCloser, progress: -1})
@@ -208,7 +209,7 @@ func getCopyright() string {
 	if year != 2025 {
 		copyrightYear = fmt.Sprintf("%s-%d", copyrightYear, year)
 	}
-	msg := "Made with ❤️ by Abigail Adegbiji @aabiji, %s"
+	msg := "Made with ❤️, @aabiji, %s"
 	return fmt.Sprintf(msg, copyrightYear)
 }
 
@@ -278,6 +279,10 @@ func (ui *UI) DrawFrame(gtx C) {
 
 	layout.Stack{}.Layout(gtx,
 		layout.Stacked(func(gtx C) D { // navigation icon
+			if ui.showAuthPopup {
+				return layout.Dimensions{}
+			}
+
 			return layout.Inset{
 				Top: 16, Left: 16,
 			}.Layout(gtx, func(gtx C) D {
@@ -291,6 +296,10 @@ func (ui *UI) DrawFrame(gtx C) {
 		}),
 
 		layout.Stacked(func(gtx C) D { // page content
+			if ui.showAuthPopup {
+				return layout.Dimensions{}
+			}
+
 			return Div{
 				width:            75,
 				height:           90,
@@ -309,6 +318,10 @@ func (ui *UI) DrawFrame(gtx C) {
 		}),
 
 		layout.Stacked(func(gtx C) D { // error tray
+			if ui.showAuthPopup {
+				return layout.Dimensions{}
+			}
+
 			return layout.Flex{
 				Axis:      layout.Vertical,
 				Alignment: layout.Middle,
@@ -400,8 +413,9 @@ func (ui *UI) drawErrorContainer(gtx C) D {
 func (ui *UI) drawFileEntry(gtx C, file *Item) D {
 	padding := layout.Inset{Top: unit.Dp(16), Right: unit.Dp(16)}
 	if file.progress <= 0 {
-		// since there wouldn't be a progress bar at the bottom
-		padding.Bottom = unit.Dp(16)
+		padding.Bottom = unit.Dp(16) // since there wouldn't be a progress bar
+	} else {
+		padding.Right = unit.Dp(0) // since there wouldn't be a close button
 	}
 
 	return Div{
@@ -490,9 +504,11 @@ func (ui *UI) drawHomePage(gtx C) D {
 			if len(ui.recipients) == 0 {
 				return Spinner(gtx, ui.styles, "Looking for recipients...")
 			}
-
-			return material.List(ui.styles.theme, ui.recipientsList).Layout(gtx,
+			list := material.List(ui.styles.theme, ui.recipientsList)
+			list.AnchorStrategy = material.Overlay
+			return list.Layout(gtx,
 				len(ui.recipients), func(gtx C, i int) D {
+					gtx.Constraints.Max.Y = gtx.Constraints.Max.Y * 50 / 100
 					return Checkbox(gtx, ui.styles, &ui.recipients[i].check,
 						ui.icons[CHECK_ICON], ui.recipients[i].name)
 				})
@@ -502,8 +518,11 @@ func (ui *UI) drawHomePage(gtx C) D {
 
 	if len(ui.files) > 0 {
 		widgets = append(widgets,
-			layout.Flexed(0.5, func(gtx C) D { // list of files
-				return material.List(ui.styles.theme, ui.filesList).Layout(gtx,
+			layout.Rigid(func(gtx C) D { // list of files
+				gtx.Constraints.Max.Y = gtx.Constraints.Max.Y * 50 / 100
+				list := material.List(ui.styles.theme, ui.filesList)
+				list.AnchorStrategy = material.Overlay
+				return list.Layout(gtx,
 					len(ui.files), func(gtx C, i int) D {
 						return ui.drawFileEntry(gtx, &ui.files[i])
 					})

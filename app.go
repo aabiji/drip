@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"os"
 	"time"
 
 	"gioui.org/app"
@@ -46,7 +47,23 @@ func NewApp() App {
 }
 
 func (a *App) Launch() {
-	go func() { a.openWindow() }()
+	go func() {
+		var ops op.Ops
+		window := new(app.Window)
+		a.ui.picker = explorer.NewExplorer(window)
+
+		for {
+			switch event := window.Event().(type) {
+			case app.DestroyEvent:
+				a.Shutdown()
+				os.Exit(0)
+			case app.FrameEvent:
+				gtx := app.NewContext(&ops, event)
+				a.ui.DrawFrame(gtx)
+				event.Frame(gtx.Ops)
+			}
+		}
+	}()
 	app.Main()
 }
 
@@ -56,23 +73,6 @@ func (a *App) Shutdown() {
 	close(a.nodeEvents)
 	a.cancel()
 	a.node.Shutdown()
-}
-
-func (a *App) openWindow() {
-	var ops op.Ops
-	window := new(app.Window)
-	a.ui.picker = explorer.NewExplorer(window)
-
-	for {
-		switch event := window.Event().(type) {
-		case app.DestroyEvent:
-			return
-		case app.FrameEvent:
-			gtx := app.NewContext(&ops, event)
-			a.ui.DrawFrame(gtx)
-			event.Frame(gtx.Ops)
-		}
-	}
 }
 
 func (a *App) sendFiles() {

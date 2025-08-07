@@ -4,6 +4,13 @@ import (
 	"context"
 )
 
+// TODO:
+// - cancelling transfers
+// - knowing when a transfer is complete
+// - shutdown (including tcp) when closing window
+// - port over to android
+// - should have a background process running indefintely...
+
 // event types
 // TRANSFER_REQUEST and TRANSFER_RESPONSE are also used
 const (

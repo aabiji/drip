@@ -2,12 +2,13 @@ package main
 
 import (
 	"encoding/json"
-	"gioui.org/widget"
-	"github.com/kirsle/configdir"
 	"io"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"gioui.org/app"
+	"gioui.org/widget"
 )
 
 type Settings struct {
@@ -15,15 +16,7 @@ type Settings struct {
 	TrustPeers   widget.Bool
 	NotifyUser   widget.Bool
 	DarkMode     widget.Bool
-}
-
-func configPath() string {
-	configPath := configdir.LocalConfig("drip")
-	err := configdir.MakePath(configPath)
-	if err != nil {
-		panic(err)
-	}
-	return filepath.Join(configPath, "settings.json")
+	path         string
 }
 
 func saveSettings(s Settings) {
@@ -31,7 +24,7 @@ func saveSettings(s Settings) {
 	if err != nil {
 		panic(err)
 	}
-	if err := os.WriteFile(configPath(), jsonData, 0644); err != nil {
+	if err := os.WriteFile(s.path, jsonData, 0644); err != nil {
 		panic(err)
 	}
 }
@@ -43,14 +36,21 @@ func loadSettings() Settings {
 	}
 	defaultFolder := filepath.Join(home, "Downloads")
 
+	base, err := app.DataDir()
+	if err != nil {
+		panic(err)
+	}
+	configPath := filepath.Join(base, "settings.json")
+
 	settings := Settings{
 		DarkMode:     widget.Bool{Value: false},
 		TrustPeers:   widget.Bool{Value: true},
 		NotifyUser:   widget.Bool{Value: true},
 		DownloadPath: defaultFolder,
+		path:         configPath,
 	}
 
-	file, err := os.Open(configPath())
+	file, err := os.Open(configPath)
 	if os.IsNotExist(err) {
 		return settings // return defaults if there's no settings file
 	} else if err != nil {

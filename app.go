@@ -3,13 +3,10 @@ package main
 import (
 	"context"
 	"os"
-	"runtime"
 	"time"
 
 	"gioui.org/app"
 	"gioui.org/op"
-	"gioui.org/unit"
-	"gioui.org/x/explorer"
 	"gioui.org/x/notify"
 
 	"github.com/aabiji/drip/p2p"
@@ -31,41 +28,51 @@ type App struct {
 }
 
 func NewApp() App {
-	ctx, cancel := context.WithCancel(context.Background())
-	a := App{
-		settings:   loadSettings(),
-		appEvents:  make(chan p2p.Message),
-		nodeEvents: make(chan p2p.Message),
-		ctx:        ctx,
-		cancel:     cancel,
-	}
-	a.ui = NewUI(&a.settings, a.appEvents)
-	a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath,
-		a.appEvents, a.nodeEvents)
-	go a.handleAppEvents()
-	return a
+	/*
+		ctx, cancel := context.WithCancel(context.Background())
+		a := App{
+			settings:   loadSettings(),
+			appEvents:  make(chan p2p.Message),
+			nodeEvents: make(chan p2p.Message),
+			ctx:        ctx,
+			cancel:     cancel,
+		}
+		a.ui = NewUI(&a.settings, a.appEvents)
+		a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath,
+			a.appEvents, a.nodeEvents)
+		go a.handleAppEvents()
+		return a
+	*/
+	return App{}
 }
 
 func (a *App) Launch() {
 	go func() {
 		var ops op.Ops
 		window := new(app.Window)
-		window.Option(app.Title("Drip"))
-		window.Option(app.PortraitOrientation.Option())
-		if runtime.GOOS != "android" && runtime.GOOS != "ios" && runtime.GOOS != "js" {
-			window.Option(app.Size(unit.Dp(650), unit.Dp(700)))
-			window.Option(app.MaxSize(unit.Dp(650), unit.Dp(700)))
+
+		if err := WriteToDownloadsFolder("this-works.txt", "text/plain", []byte("hello world!")); err != nil {
+			panic(err)
 		}
-		a.ui.picker = explorer.NewExplorer(window)
+
+		/*
+			window.Option(app.Title("Drip"))
+			window.Option(app.PortraitOrientation.Option())
+			if runtime.GOOS != "android" && runtime.GOOS != "ios" && runtime.GOOS != "js" {
+				window.Option(app.Size(unit.Dp(650), unit.Dp(700)))
+				window.Option(app.MaxSize(unit.Dp(650), unit.Dp(700)))
+			}
+			a.ui.picker = explorer.NewExplorer(window)
+		*/
 
 		for {
 			switch event := window.Event().(type) {
 			case app.DestroyEvent:
-				a.Shutdown()
+				//a.Shutdown()
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, event)
-				a.ui.DrawFrame(gtx)
+				//a.ui.DrawFrame(gtx)
 				event.Frame(gtx.Ops)
 			}
 		}

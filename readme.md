@@ -11,5 +11,5 @@ Build:
 ./build.sh
 
 # get log messages
-adb logcat | grep -E "com.github.drip.* F | F .*com.github.drip"
+adb logcat | grep drip-debug
 ```

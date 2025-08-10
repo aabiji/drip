@@ -1,12 +1,15 @@
 package main
 
-import "runtime"
+import (
+	"log"
+	"runtime"
+)
 
 func main() {
 	if runtime.GOOS == "android" {
-		defer AndroidPanicLogger()
+		log.SetOutput(androidLogger{})
+		defer androidCrashHandler()
 	}
-
 	app := NewApp()
 	app.Launch()
 }

@@ -11,5 +11,5 @@ Build:
 ./build.sh
 
 # get log messages
-adb logcat | grep drip-debug
+adb logcat -s drip-debug
 ```

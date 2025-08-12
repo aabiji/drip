@@ -65,6 +65,7 @@ type Item struct {
 
 type UI struct {
 	settings  *Settings
+	isAndroid bool
 	appEvents chan p2p.Message
 	picker    *explorer.Explorer
 	styles    Styles
@@ -87,7 +88,7 @@ type UI struct {
 	sendingDone   bool
 }
 
-func NewUI(s *Settings, appEvents chan p2p.Message) *UI {
+func NewUI(s *Settings, appEvents chan p2p.Message, isAndroid bool) *UI {
 	ui := &UI{
 		appEvents: appEvents,
 		recipientsList: &widget.List{
@@ -99,10 +100,13 @@ func NewUI(s *Settings, appEvents chan p2p.Message) *UI {
 		buttons:     make([]widget.Clickable, BTNS_END-BTNS_START),
 		currentPage: HOME_PAGE,
 		settings:    s,
+		styles:      NewStyles(s.DarkMode.Value),
+		isAndroid:   isAndroid,
 	}
 
-	ui.setupFolderList()
-	ui.styles = NewStyles(ui.settings.DarkMode.Value)
+	if !isAndroid {
+		ui.setupFolderList()
+	}
 
 	iconBytes := [][]byte{
 		icons.NavigationArrowBack, icons.ActionSettings,
@@ -248,15 +252,6 @@ func (ui *UI) handleInputs(gtx C) {
 		}
 	}
 
-	for i := 0; i < len(ui.folders); i++ { // navigate folders
-		if ui.folders[i].clickable.Clicked(gtx) {
-			ui.settings.DownloadPath =
-				filepath.Join(ui.settings.DownloadPath, ui.folders[i].name)
-			ui.setupFolderList()
-			break
-		}
-	}
-
 	if !ui.sendBtnDisabled() && ui.buttons[SEND_BTN].Clicked(gtx) {
 		ui.appEvents <- p2p.NewMessage(p2p.SEND_FILES, "")
 	}
@@ -266,21 +261,32 @@ func (ui *UI) handleInputs(gtx C) {
 		ui.appEvents <- p2p.NewMessage(p2p.AUTH_GRANTED, acceptClicked)
 	}
 
-	if ui.buttons[BACK_BTN].Clicked(gtx) {
-		ui.settings.DownloadPath = filepath.Dir(ui.settings.DownloadPath)
-		ui.setupFolderList() // navigate one folder back up
-	} else if ui.buttons[SELECT_BTN].Clicked(gtx) {
-		ui.currentPage = SETTINGS_PAGE // close the folder picker
-	} else if ui.buttons[PATH_BTN].Clicked(gtx) {
-		ui.currentPage = PICKER_PAGE // show the folder picker
-	}
-
 	if ui.buttons[UPLOAD_BTN].Clicked(gtx) {
 		go func() { ui.addFiles() }()
 	}
 
 	if ui.settings.DarkMode.Update(gtx) { // toggle theme
 		ui.styles = NewStyles(ui.settings.DarkMode.Value)
+	}
+
+	// handle the folder picker ui
+	if !ui.isAndroid {
+		for i := 0; i < len(ui.folders); i++ { // navigate folders
+			if ui.folders[i].clickable.Clicked(gtx) {
+				ui.settings.DownloadPath =
+					filepath.Join(ui.settings.DownloadPath, ui.folders[i].name)
+				ui.setupFolderList()
+				break
+			}
+		}
+		if ui.buttons[BACK_BTN].Clicked(gtx) {
+			ui.settings.DownloadPath = filepath.Dir(ui.settings.DownloadPath)
+			ui.setupFolderList() // navigate one folder back up
+		} else if ui.buttons[SELECT_BTN].Clicked(gtx) {
+			ui.currentPage = SETTINGS_PAGE // close the folder picker
+		} else if ui.buttons[PATH_BTN].Clicked(gtx) {
+			ui.currentPage = PICKER_PAGE // show the folder picker
+		}
 	}
 }
 
@@ -357,7 +363,7 @@ func (ui *UI) DrawFrame(gtx C) {
 		}),
 
 		layout.Stacked(func(gtx C) D { // folder picker modal
-			if ui.currentPage != PICKER_PAGE {
+			if ui.currentPage != PICKER_PAGE || ui.isAndroid {
 				return layout.Dimensions{}
 			}
 			return ui.drawFolderPicker(gtx)
@@ -599,6 +605,13 @@ func (ui *UI) drawSettingsPage(gtx C) D {
 				ui.icons[CHECK_ICON], "Trust previous senders")
 		}),
 		layout.Rigid(func(gtx C) D { // choose download path
+			// folder selection will be a desktop only feature
+			// because i can't figure out how to open android's
+			// folder picker through the jni bride
+			if ui.isAndroid {
+				return layout.Dimensions{}
+			}
+
 			return layout.Flex{
 				Spacing: layout.SpaceBetween, Axis: layout.Horizontal,
 			}.Layout(gtx,

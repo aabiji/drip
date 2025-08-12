@@ -1,11 +1,10 @@
 package main
 
 import (
+	_ "embed"
 	"image"
 	"image/color"
-	"os"
 
-	"gioui.org/font"
 	"gioui.org/font/opentype"
 	"gioui.org/io/pointer"
 	"gioui.org/layout"
@@ -17,6 +16,9 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 )
+
+//go:embed assets/roboto.ttf
+var robotoFont []byte
 
 type Styles struct {
 	theme        *material.Theme
@@ -36,15 +38,6 @@ type Styles struct {
 	secondary500 color.NRGBA
 	bgOverlay    color.NRGBA
 	transparent  color.NRGBA
-}
-
-func loadFont(path string) ([]font.FontFace, error) {
-	contents, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	faces, err := opentype.ParseCollection(contents)
-	return faces, err
 }
 
 func NewStyles(darkMode bool) Styles {
@@ -85,7 +78,7 @@ func NewStyles(darkMode bool) Styles {
 	base.theme = material.NewTheme()
 	base.theme.Fg = base.fg500
 
-	roboto, err := loadFont("assets/roboto.ttf")
+	roboto, err := opentype.ParseCollection(robotoFont)
 	if err != nil {
 		panic(err)
 	}

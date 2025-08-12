@@ -3,8 +3,6 @@
 //go:generate javac -classpath $ANDROID_HOME/platforms/android-36/android.jar -d /tmp/java_classes android_utility.java
 //go:generate jar cf android_utility.jar -C /tmp/java_classes .
 
-// TODO: write a tutorial on how to do this, explaining *why* as we go, using my class as an example
-
 package main
 
 /*
@@ -64,41 +62,75 @@ func getJNIEnv() (*jnigi.Env, func()) {
 	return env, cleanup
 }
 
-// since android doesn't allow us to access files and folders willy nilly,
-// call the writeToDownloadsFolder static method in android_utility.java
-// in order to write to the user's Downloads folder
-func WriteToDownloadsFolder(
-	filename string, mimetype string, contents []byte) error {
+type AndroidBridge struct {
+	context *jnigi.ObjectRef // android.content.Content
+	env     *jnigi.Env
+	cleanup func()
+}
+
+func NewAndroidBridge() *AndroidBridge {
+	if runtime.GOOS != "android" {
+		return nil
+	}
 	env, cleanup := getJNIEnv()
-	defer cleanup()
+	context := jnigi.WrapJObject(app.AppContext(), "android/content/Context", false)
+	return &AndroidBridge{context, env, cleanup}
+}
 
+func (b *AndroidBridge) getDownloadsFolderPath() (string, error) {
+	strObj, err := b.env.NewObject("java/lang/String")
+	if err != nil {
+		return "", err
+	}
+
+	err = b.env.CallStaticMethod(
+		"com/aabiji/drip/android_utility", "getDownloadsFolderPath", strObj)
+	if err != nil {
+		return "", err
+	}
+
+	var bytes []byte
+	if err := strObj.CallMethod(b.env, "getBytes", &bytes, b.env.GetUTF8String()); err != nil {
+		return "", err
+	}
+
+	return string(bytes), nil
+}
+
+func (b *AndroidBridge) WriteFile(
+	filename string, mimetype string, contents []byte) error {
 	// get the arguments as objects
-	contextObj := jnigi.WrapJObject(app.AppContext(), "android/content/Context", false)
-
-	filenameObj, err := env.NewObject("java/lang/String", []byte(filename))
+	basePath, err := b.getDownloadsFolderPath()
+	if err != nil {
+		return err
+	}
+	fmt.Println(basePath)
+	basePathObj, err := b.env.NewObject("java/lang/String", []byte(basePath))
 	if err != nil {
 		return err
 	}
 
-	mimetypeObj, err := env.NewObject("java/lang/String", []byte(mimetype))
+	filenameObj, err := b.env.NewObject("java/lang/String", []byte(filename))
 	if err != nil {
 		return err
 	}
 
-	contentsObj := env.NewByteArrayFromSlice(contents).GetObject()
+	mimetypeObj, err := b.env.NewObject("java/lang/String", []byte(mimetype))
+	if err != nil {
+		return err
+	}
 
-	// call the function
-	err = env.CallStaticMethod(
-		"com/aabiji/drip/android_utility", "writeToDownloadsFolder",
+	contentsObj := b.env.NewByteArrayFromSlice(contents)
+
+	err = b.env.CallStaticMethod(
+		"com/aabiji/drip/android_utility", "writeToPath",
 		nil, // returns void
-		contextObj, filenameObj, mimetypeObj, contentsObj,
+		b.context, contentsObj, basePathObj, filenameObj, mimetypeObj,
 	)
 	return err
 }
 
-type androidLogger struct{}
-
-func (logger androidLogger) Write(data []byte) (int, error) {
+func (b AndroidBridge) Write(data []byte) (int, error) {
 	tag := C.CString("drip-debug")
 	defer C.free(unsafe.Pointer(tag))
 
@@ -112,6 +144,8 @@ func (logger androidLogger) Write(data []byte) (int, error) {
 }
 
 func androidCrashHandler() {
-	msg := fmt.Sprintf("\n%v\n%s\n", recover(), debug.Stack())
-	androidLogger{}.Write([]byte(msg))
+	if r := recover(); r != nil {
+		msg := fmt.Sprintf("%v\n%s\n", recover(), debug.Stack())
+		AndroidBridge{}.Write([]byte(msg))
+	}
 }

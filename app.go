@@ -26,11 +26,13 @@ type App struct {
 	requestSender   string
 	currentTransfer string
 
+	android *AndroidBridge
+
 	ctx    context.Context
 	cancel context.CancelFunc
 }
 
-func NewApp() App {
+func NewApp(bridge *AndroidBridge) App {
 	ctx, cancel := context.WithCancel(context.Background())
 	a := App{
 		settings:   loadSettings(),
@@ -38,13 +40,13 @@ func NewApp() App {
 		nodeEvents: make(chan p2p.Message),
 		ctx:        ctx,
 		cancel:     cancel,
+		android:    bridge,
 	}
-	a.ui = NewUI(&a.settings, a.appEvents)
+	a.ui = NewUI(&a.settings, a.appEvents, bridge != nil)
 	a.node = p2p.NewNode(ctx, &a.ui.settings.DownloadPath,
 		a.appEvents, a.nodeEvents)
 	go a.handleAppEvents()
 	return a
-	return App{}
 }
 
 func (a *App) Launch() {
@@ -62,11 +64,11 @@ func (a *App) Launch() {
 		for {
 			switch event := window.Event().(type) {
 			case app.DestroyEvent:
-				//a.Shutdown()
+				a.Shutdown()
 				os.Exit(0)
 			case app.FrameEvent:
 				gtx := app.NewContext(&ops, event)
-				//a.ui.DrawFrame(gtx)
+				a.ui.DrawFrame(gtx)
 				event.Frame(gtx.Ops)
 			}
 		}

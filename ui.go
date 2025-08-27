@@ -227,8 +227,7 @@ func getCopyright() string {
 	if year != 2025 {
 		copyrightYear = fmt.Sprintf("%s-%d", copyrightYear, year)
 	}
-	msg := "Made with ❤️, @aabiji, %s"
-	return fmt.Sprintf(msg, copyrightYear)
+	return fmt.Sprintf("Abigail Adegbiji, %s", copyrightYear)
 }
 
 func (ui *UI) handleInputs(gtx C) {
@@ -319,8 +318,14 @@ func (ui *UI) DrawFrame(gtx C) {
 				return layout.Dimensions{}
 			}
 
+			widthPercent := 75
+			if gtx.Constraints.Max.X <= 300 {
+				widthPercent = 96
+			}
+
 			return Div{
-				width:            75,
+				padding:          layout.Inset{Top: unit.Dp(35)},
+				width:            widthPercent,
 				height:           90,
 				centerHorizontal: true,
 				centerVertical:   true,

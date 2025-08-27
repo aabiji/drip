@@ -1,3 +1,5 @@
+//go:build android
+
 // compile the android_utility class
 // jar files are automatically included in android builds by gogio
 //go:generate javac -classpath $ANDROID_HOME/platforms/android-36/android.jar -d /tmp/java_classes android_utility.java
@@ -31,7 +33,6 @@ import "C"
 import (
 	"fmt"
 	"runtime"
-	"runtime/debug"
 	"strings"
 	"unsafe"
 
@@ -68,10 +69,7 @@ type AndroidBridge struct {
 	cleanup func()
 }
 
-func NewAndroidBridge() *AndroidBridge {
-	if runtime.GOOS != "android" {
-		return nil
-	}
+func NewOSBridge() OSBridge {
 	env, cleanup := getJNIEnv()
 	context := jnigi.WrapJObject(app.AppContext(), "android/content/Context", false)
 	return &AndroidBridge{context, env, cleanup}
@@ -141,11 +139,4 @@ func (b AndroidBridge) Write(data []byte) (int, error) {
 		C.free(unsafe.Pointer(msg))
 	}
 	return len(data), nil
-}
-
-func androidCrashHandler() {
-	if r := recover(); r != nil {
-		msg := fmt.Sprintf("%v\n%s\n", recover(), debug.Stack())
-		AndroidBridge{}.Write([]byte(msg))
-	}
 }

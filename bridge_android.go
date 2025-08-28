@@ -1,10 +1,5 @@
 //go:build android
 
-// compile the android_utility class
-// jar files are automatically included in android builds by gogio
-//go:generate javac -classpath $ANDROID_HOME/platforms/android-36/android.jar -d /tmp/java_classes android_utility.java
-//go:generate jar cf android_utility.jar -C /tmp/java_classes .
-
 package main
 
 /*
